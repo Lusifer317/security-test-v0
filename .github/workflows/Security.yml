@@ -18,7 +18,7 @@ on:
     # Comprehensive scan: Sundays at 2 AM UTC
     - cron: '0 2 * * 0'
     # Quick security pulse: Daily at 6 AM UTC (weekdays only)
-    #- cron: '0 6 * * 1-5'
+    # - cron: '0 6 * * 1-5'
   workflow_dispatch:
     inputs:
       scan_mode:
@@ -755,7 +755,7 @@ jobs:
             
             if [ -d "all-security-reports/security-scan-$category" ]; then
               # Process JSON results
-              for json_file in $(find "all-security-reports/security-scan-$category" -name "*.json" -type f); do
+              for json_file in $(find "all-security-reports/security-scan-$category" -name "*.json" -type f 2>/dev/null || true); do
                 if [ -s "$json_file" ]; then
                   filename=$(basename "$json_file")
                   case "$filename" in
@@ -801,7 +801,7 @@ jobs:
               done
               
               # Process SARIF results for additional context
-              for sarif_file in $(find "all-security-reports/security-scan-$category" -name "*.sarif" -type f); do
+              for sarif_file in $(find "all-security-reports/security-scan-$category" -name "*.sarif" -type f 2>/dev/null || true); do
                 if [ -s "$sarif_file" ] && jq -e '.runs' "$sarif_file" >/dev/null 2>&1; then
                   sarif_findings=$(jq '[.runs[].results[]] | length' "$sarif_file" 2>/dev/null || echo "0")
                   category_findings["$category"]=$((${category_findings["$category"]} + sarif_findings))
@@ -820,7 +820,7 @@ jobs:
           
           for env in staging development; do
             if [ -d "all-security-reports/dast-results-$env" ]; then
-              for json_file in $(find "all-security-reports/dast-results-$env" -name "*.json" -type f); do
+              for json_file in $(find "all-security-reports/dast-results-$env" -name "*.json" -type f 2>/dev/null || true); do
                 if [ -s "$json_file" ]; then
                   filename=$(basename "$json_file")
                   case "$filename" in
@@ -1055,456 +1055,6 @@ jobs:
           4. Monitor compliance score trends over time
           EOF
 
-      - name: 📋 Generate Technical Security Report  
-        run: |
-          echo "📋 Generating technical security report..."
-          
-          cat > reports/technical/security-technical-details.md << 'EOF'
-          # 🔧 Technical Security Analysis Report
-          
-          **Repository:** `${{ github.repository }}`  
-          **Generated:** $(date -u '+%Y-%m-%d %H:%M UTC')  
-          **Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          
-          ---
-          
-          ## 🎯 Vulnerability Breakdown by Category
-          
-          | Security Domain | Total | Critical | High | Medium | Status |
-          |-----------------|-------|----------|------|---------|--------|
-          EOF
-          
-          # Add category breakdowns from analysis data
-          for category in sast_advanced secrets_deep dependencies infrastructure dast; do
-            findings=$(jq ".categories.$category.findings" security-analysis-data.json)
-            critical=$(jq ".categories.$category.critical" security-analysis-data.json)
-            high=$(jq ".categories.$category.high" security-analysis-data.json)
-            
-            case $category in
-              "sast_advanced") display_name="Static Analysis" ;;
-              "secrets_deep") display_name="Secrets Detection" ;;
-              "dependencies") display_name="Dependencies" ;;  
-              "infrastructure") display_name="Infrastructure" ;;
-              "dast") display_name="Dynamic Testing" ;;
-            esac
-            
-            status_icon=$([ $critical -eq 0 ] && echo "✅" || echo "❌")
-            echo "| **$display_name** | $findings | $critical | $high | - | $status_icon |" >> reports/technical/security-technical-details.md
-          done
-          
-          cat >> reports/technical/security-technical-details.md << 'EOF'
-          
-          ---
-          
-          ## 🔍 Detailed Findings Analysis
-          
-          ### Static Application Security Testing (SAST)
-          - **Tool Coverage:** Semgrep (comprehensive rulesets), Bandit (Python-specific)
-          - **Rule Categories:** OWASP Top 10, CWE Top 25, Security Audit, Custom Rules
-          - **Code Coverage:** Full repository scan with advanced pattern matching
-          - **Configuration:** Maximum depth scanning with timeout protection
-          
-          ### Secrets Detection
-          - **Tool Coverage:** TruffleHog (git history), Semgrep (patterns), detect-secrets
-          - **Detection Scope:** Source code, configuration files, documentation
-          - **Historical Analysis:** Full git history scanning for leaked credentials
-          - **Pattern Matching:** High-confidence secret patterns with entropy analysis
-          
-          ### Dependency Vulnerability Assessment
-          - **Tool Coverage:** Trivy (multi-language), npm audit, Safety, pip-audit, Cargo audit
-          - **Database Sources:** NVD, GitHub Advisory, OSV, vendor advisories
-          - **Language Support:** Node.js, Python, Go, Rust, Java, .NET
-          - **Container Scanning:** Base image and dependency vulnerability analysis
-          
-          ### Infrastructure Security
-          - **IaC Scanning:** Terraform, CloudFormation, Kubernetes manifests
-          - **Container Security:** Dockerfile best practices, base image vulnerabilities
-          - **Configuration Analysis:** Security misconfigurations and compliance checks
-          - **Cloud Security:** AWS, Azure, GCP configuration validation
-          
-          ### Dynamic Application Security Testing (DAST)
-          - **Tool Coverage:** Nuclei (comprehensive template library)
-          - **Test Categories:** CVE exploitation, misconfigurations, injection attacks
-          - **Environment Coverage:** Staging, Development (Production on-demand)
-          - **Web Security:** OWASP Top 10, authentication bypass, business logic flaws
-          
-          ---
-          
-          ## 🛠️ Remediation Guidelines
-          
-          ### Critical Issues (Priority: Immediate)
-          1. **Review all critical findings** in GitHub Security tab
-          2. **Assess production impact** - determine if issues exist in production
-          3. **Implement fixes** following secure coding practices
-          4. **Validate fixes** with re-scan or targeted testing
-          5. **Document remediation** for audit and compliance tracking
-          
-          ### High Severity Issues (Priority: 1 Week)
-          1. **Triage findings** by business impact and exploitability
-          2. **Create remediation tickets** in project management system
-          3. **Assign to appropriate teams** (Dev, DevOps, Security)
-          4. **Set deadlines** based on risk assessment
-          5. **Track progress** through to completion
-          
-          ### Medium/Low Issues (Priority: 2-4 Weeks)
-          1. **Batch similar issues** for efficient remediation
-          2. **Consider risk acceptance** for low-impact findings
-          3. **Schedule regular reviews** for ongoing monitoring
-          4. **Implement preventive controls** to avoid future occurrences
-          
-          ---
-          
-          ## 🔧 Tool Configuration & Coverage
-          
-          ### Scan Coverage Matrix
-          | Language/Technology | SAST | Secrets | Dependencies | IaC | DAST |
-          |-------------------|------|---------|-------------|-----|------|
-          | **JavaScript/Node.js** | ✅ | ✅ | ✅ | - | ✅ |
-          | **Python** | ✅ | ✅ | ✅ | - | ✅ |
-          | **Go** | ✅ | ✅ | ✅ | - | ✅ |
-          | **Java/.NET** | ✅ | ✅ | ✅ | - | ✅ |
-          | **Rust** | ✅ | ✅ | ✅ | - | ✅ |
-          | **Docker** | ✅ | ✅ | ✅ | ✅ | - |
-          | **Kubernetes** | - | ✅ | - | ✅ | ✅ |
-          | **Terraform** | - | ✅ | - | ✅ | - |
-          | **CloudFormation** | - | ✅ | - | ✅ | - |
-          | **Web Applications** | ✅ | ✅ | - | - | ✅ |
-          
-          ### Security Rules & Templates
-          - **Semgrep Rules:** 2000+ community and custom rules
-          - **Nuclei Templates:** 8000+ vulnerability detection templates  
-          - **Trivy DB:** 180,000+ vulnerabilities from multiple sources
-          - **Custom Patterns:** Organization-specific security requirements
-          
-          ---
-          
-          ## 📈 Metrics & KPIs
-          
-          ### Security Posture Indicators
-          - **Mean Time to Detection (MTTD):** < 24 hours (automated scanning)
-          - **Mean Time to Remediation (MTTR):** Target <72 hours for critical
-          - **False Positive Rate:** <10% (tuned rulesets and baseline)
-          - **Coverage Percentage:** 100% code, 95% dependencies, 90% infrastructure
-          
-          ### Trend Analysis
-          - **Weekly Scan Frequency:** Comprehensive security assessment
-          - **Pull Request Gates:** Fast feedback on every code change
-          - **Historical Tracking:** Security debt and improvement metrics
-          - **Benchmark Comparison:** Industry standards and best practices
-          
-          ---
-          
-          **For detailed findings and evidence, refer to:**
-          - GitHub Security Tab (SARIF results)
-          - Workflow Artifacts (detailed JSON reports)
-          - Security Intelligence Dashboard
-          EOF
-
-      - name: 📋 Generate Compliance Report
-        run: |
-          echo "📋 Generating compliance and audit report..."
-          
-          compliance_score=$(jq '.risk_assessment.compliance_score' security-analysis-data.json)
-          critical_count=$(jq '.totals.critical' security-analysis-data.json)
-          high_count=$(jq '.totals.high' security-analysis-data.json)
-          
-          cat > reports/compliance/security-compliance-audit.md << EOF
-          # 📋 Security Compliance & Audit Report
-          
-          **Report Type:** Security Compliance Assessment  
-          **Repository:** \`${{ github.repository }}\`  
-          **Assessment Date:** $(date -u '+%Y-%m-%d %H:%M UTC')  
-          **Compliance Frameworks:** SOC 2 Type II, ISO 27001, NIST Cybersecurity Framework  
-          **Assessment Period:** Last 30 days  
-          **Next Assessment:** $(date -u -d '+7 days' '+%Y-%m-%d')
-          
-          ---
-          
-          ## 🎯 Executive Summary
-          
-          **Overall Compliance Score:** ${compliance_score}%  
-          **Compliance Status:** $([ $compliance_score -ge 90 ] && echo "✅ **COMPLIANT**" || [ $compliance_score -ge 70 ] && echo "⚠️ **PARTIALLY COMPLIANT**" || echo "❌ **NON-COMPLIANT**")  
-          **Risk Level:** $(jq -r '.risk_assessment.level' security-analysis-data.json | tr '[:lower:]' '[:upper:]')  
-          **Audit Readiness:** $([ $compliance_score -ge 85 ] && echo "READY" || echo "REQUIRES REMEDIATION")
-          
-          ---
-          
-          ## 🛡️ Security Control Validation
-          
-          ### SC-1: Security Scanning Coverage
-          | Control | Implementation | Status | Evidence |
-          |---------|---------------|--------|----------|
-          | **Static Application Security Testing** | ✅ Implemented | Active | Semgrep, Bandit comprehensive scans |
-          | **Dynamic Application Security Testing** | ✅ Implemented | Active | Nuclei multi-environment scanning |
-          | **Dependency Vulnerability Scanning** | ✅ Implemented | Active | Trivy, npm audit, Safety multi-language |
-          | **Infrastructure Security Scanning** | ✅ Implemented | Active | Checkov, Trivy IaC configuration scanning |
-          | **Secrets Detection & Prevention** | ✅ Implemented | Active | TruffleHog, Semgrep pattern matching |
-          | **Container Security Scanning** | ✅ Implemented | Active | Trivy container and base image analysis |
-          
-          ### SC-2: Automated Security Testing Integration
-          | Control | Implementation | Status | Evidence |
-          |---------|---------------|--------|----------|
-          | **Pull Request Security Gates** | ✅ Implemented | Active | Blocking on critical issues |
-          | **Scheduled Security Assessments** | ✅ Implemented | Active | Weekly comprehensive + daily pulse |
-          | **Security Results Integration** | ✅ Implemented | Active | GitHub Security tab, SARIF uploads |
-          | **Automated Alerting & Notification** | ✅ Implemented | Active | Slack, email, JIRA integration |
-          | **Incident Response Procedures** | ✅ Implemented | Active | Emergency scan capabilities |
-          | **Evidence Preservation** | ✅ Implemented | Active | Artifact retention policies |
-          
-          ### SC-3: Vulnerability Management Lifecycle
-          | Control | Implementation | Status | Evidence |
-          |---------|---------------|--------|----------|
-          | **Vulnerability Identification** | ✅ Implemented | Active | Multi-tool detection approach |
-          | **Risk-based Prioritization** | ✅ Implemented | Active | Severity-based triage system |
-          | **Remediation Tracking** | ✅ Implemented | Active | GitHub Issues, JIRA integration |
-          | **Verification & Validation** | ✅ Implemented | Active | Re-scan capabilities |
-          | **Metrics & Reporting** | ✅ Implemented | Active | Automated compliance reporting |
-          | **Management Oversight** | ✅ Implemented | Active | Executive dashboard and alerts |
-          
-          ---
-          
-          ## 📊 Compliance Metrics (Current Period)
-          
-          ### Security Scanning Performance
-          - **Scan Execution Rate:** 100% (All scheduled scans completed)
-          - **Mean Time to Detection (MTTD):** < 24 hours
-          - **Security Gate Effectiveness:** $([ $critical_count -eq 0 ] && echo "100% (No critical issues in production)" || echo "Partial (Critical issues detected)")
-          - **False Positive Rate:** <10% (Tuned detection rules)
-          
-          ### Vulnerability Management Metrics  
-          - **Critical Issues Outstanding:** $critical_count (Target: 0)
-          - **High Issues Outstanding:** $high_count (Target: <5)
-          - **Average Remediation Time:** <72 hours (Critical), <7 days (High)
-          - **Security Debt Trend:** $([ $critical_count -le 1 ] && [ $high_count -le 10 ] && echo "Decreasing" || echo "Requires attention")
-          
-          ### Process Compliance Indicators
-          - **Security Training Completion:** 100% (Development team)
-          - **Security Review Coverage:** 100% (All code changes)
-          - **Incident Response Readiness:** Active (Emergency scan procedures)
-          - **Audit Trail Completeness:** 100% (All activities logged)
-          
-          ---
-          
-          ## 🔍 Control Effectiveness Assessment
-          
-          ### SOC 2 Type II Controls
-          
-          **CC6.1 - Logical and Physical Access Controls**
-          - ✅ **Control:** Repository access controls and branch protection
-          - ✅ **Testing:** Automated security scanning on all code changes
-          - ✅ **Evidence:** GitHub security policies, scan results, access logs
-          
-          **CC7.1 - System Operations**  
-          - ✅ **Control:** Automated security monitoring and alerting
-          - ✅ **Testing:** Continuous security assessment and reporting
-          - ✅ **Evidence:** Workflow execution logs, alert configurations
-          
-          **CC7.2 - Change Management**
-          - ✅ **Control:** Security validation in CI/CD pipeline
-          - ✅ **Testing:** All changes subject to security scanning
-          - ✅ **Evidence:** Pull request security gates, scan artifacts
-          
-          ### ISO 27001 Controls
-          
-          **A.14.2.1 - Secure Development Policy**
-          - ✅ **Implementation:** Security scanning integrated in development lifecycle
-          - ✅ **Effectiveness:** $([ $critical_count -eq 0 ] && echo "High - No critical security issues" || echo "Moderate - Critical issues require attention")
-          - ✅ **Evidence:** Security pipeline configuration, scan results
-          
-          **A.12.6.1 - Management of Technical Vulnerabilities**
-          - ✅ **Implementation:** Automated vulnerability detection and tracking
-          - ✅ **Effectiveness:** $([ $high_count -le 5 ] && echo "High - Low outstanding vulnerability count" || echo "Moderate - Vulnerability backlog requires attention")
-          - ✅ **Evidence:** Vulnerability scan reports, remediation tracking
-          
-          ---
-          
-          ## 🎯 Audit Recommendations
-          
-          ### Immediate Actions (0-30 days)
-          $([ $critical_count -gt 0 ] && cat << IMMEDIATE
-          - **Priority 1:** Address $critical_count critical security findings
-          - **Priority 2:** Enhance monitoring for critical issue prevention
-          - **Priority 3:** Review security development practices
-          IMMEDIATE
-          || echo "- **Status:** No immediate compliance actions required - maintain current controls")
-          
-          ### Short-term Improvements (30-90 days)
-          - **Enhanced Metrics:** Implement trend analysis and benchmarking
-          - **Process Optimization:** Review and optimize security scanning performance
-          - **Training Enhancement:** Advanced security awareness for development teams
-          - **Tool Evolution:** Evaluate and integrate emerging security technologies
-          
-          ### Long-term Strategy (90+ days)
-          - **Continuous Improvement:** Regular control effectiveness reviews
-          - **Compliance Automation:** Further automate compliance evidence collection
-          - **Risk Assessment:** Quarterly security risk assessments
-          - **Industry Benchmarking:** Compare security posture with industry standards
-          
-          ---
-          
-          ## 📋 Audit Evidence Repository
-          
-          ### Primary Evidence Sources
-          - **GitHub Security Tab:** Complete SARIF scan results with historical data
-          - **Workflow Artifacts:** Detailed JSON reports from all security tools
-          - **Compliance Reports:** This automated compliance assessment
-          - **Security Policies:** Repository security configurations and policies
-          
-          ### Supporting Documentation
-          - **Security Procedures:** Emergency response and incident handling procedures
-          - **Tool Configurations:** Security scanning tool settings and rule customizations
-          - **Training Records:** Security awareness and training completion data
-          - **Metrics Dashboard:** Real-time security posture and compliance metrics
-          
-          ### Audit Trail Components
-          - **Scan Execution Logs:** Complete history of security scans and results
-          - **Remediation Tracking:** Issue lifecycle from detection to resolution
-          - **Access Controls:** Repository permissions and security policy enforcement
-          - **Change Management:** Security validation in code change processes
-          
-          ---
-          
-          **Compliance Statement:** This assessment demonstrates that security controls are properly implemented, 
-          operating effectively, and generating appropriate evidence for audit and compliance purposes.
-          
-          **Next Review Date:** $(date -u -d '+30 days' '+%Y-%m-%d')  
-          **Assessor:** Automated Security Pipeline  
-          **Review Authority:** Security Team & Compliance Officer
-          EOF
-
-      - name: 📊 Generate Operational Dashboard Data
-        run: |
-          echo "📊 Generating operational dashboard and metrics..."
-          
-          # Create operational JSON for dashboards and monitoring
-          cat > reports/operational/security-dashboard-data.json << EOF
-          {
-            "metadata": {
-              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-              "repository": "${{ github.repository }}",
-              "branch": "${{ github.ref_name }}",
-              "workflow_run_id": "${{ github.run_id }}",
-              "scan_trigger": "${{ github.event_name }}",
-              "scan_mode": "${{ github.event.inputs.scan_mode || 'automatic' }}"
-            },
-            "security_posture": {
-              "risk_level": "$(jq -r '.risk_assessment.level' security-analysis-data.json)",
-              "compliance_score": $(jq '.risk_assessment.compliance_score' security-analysis-data.json),
-              "total_findings": $(jq '.totals.findings' security-analysis-data.json),
-              "critical_count": $(jq '.totals.critical' security-analysis-data.json),
-              "high_count": $(jq '.totals.high' security-analysis-data.json),
-              "trend": "$([ $(jq '.totals.critical' security-analysis-data.json) -eq 0 ] && echo 'stable' || echo 'declining')"
-            },
-            "scan_coverage": {
-              "sast": {
-                "enabled": true,
-                "tools": ["semgrep", "bandit"],
-                "findings": $(jq '.categories.sast_advanced.findings' security-analysis-data.json),
-                "status": "completed"
-              },
-              "secrets": {
-                "enabled": true,
-                "tools": ["trufflehog", "semgrep", "detect-secrets"],
-                "findings": $(jq '.categories.secrets_deep.findings' security-analysis-data.json),
-                "status": "completed"
-              },
-              "dependencies": {
-                "enabled": true,
-                "tools": ["trivy", "npm-audit", "safety", "pip-audit"],
-                "findings": $(jq '.categories.dependencies.findings' security-analysis-data.json),
-                "status": "completed"
-              },
-              "infrastructure": {
-                "enabled": true,
-                "tools": ["trivy", "checkov"],
-                "findings": $(jq '.categories.infrastructure.findings' security-analysis-data.json),
-                "status": "completed"
-              },
-              "dast": {
-                "enabled": $([ "${{ github.event.inputs.skip_dast }}" != "true" ] && echo "true" || echo "false"),
-                "tools": ["nuclei"],
-                "findings": $(jq '.categories.dast.findings' security-analysis-data.json),
-                "status": "$([ "${{ github.event.inputs.skip_dast }}" != "true" ] && echo 'completed' || echo 'skipped')"
-              }
-            },
-            "performance_metrics": {
-              "scan_duration": "$(date -u +%s) - $(date -d '${{ github.event.created_at }}' +%s) | bc) seconds" || "unknown",
-              "tools_executed": $(jq '[.scan_coverage | keys[]] | length' <<< '{}' || echo "5"),
-              "artifacts_generated": "6",
-              "sarif_uploads": "successful"
-            },
-            "compliance_indicators": {
-              "owasp_top10_coverage": true,
-              "cwe_top25_coverage": true,
-              "soc2_controls_active": true,
-              "iso27001_compliant": $([ $(jq '.risk_assessment.compliance_score' security-analysis-data.json) -ge 80 ] && echo "true" || echo "false"),
-              "nist_framework_aligned": true
-            },
-            "integration_status": {
-              "github_security": "active",
-              "slack_notifications": $([ -n "${{ env.SLACK_WEBHOOK_URL }}" ] && echo "true" || echo "false"),
-              "jira_integration": $([ -n "${{ env.JIRA_API_TOKEN }}" ] && echo "true" || echo "false"),
-              "email_alerts": $([ -n "${{ env.EXECUTIVE_EMAILS }}" ] && echo "true" || echo "false")
-            }
-          }
-          EOF
-          
-          # Create operational summary for monitoring
-          cat > reports/operational/security-operations-summary.md << 'EOF'
-          # 🔧 Security Operations Summary
-          
-          **Workflow Execution:** ${{ github.workflow }} - Run #${{ github.run_number }}  
-          **Execution Time:** $(date -u '+%Y-%m-%d %H:%M UTC')  
-          **Trigger:** ${{ github.event_name }}  
-          **Repository:** `${{ github.repository }}`
-          
-          ## ⚡ Pipeline Performance
-          
-          | Metric | Value | Status |
-          |--------|-------|--------|
-          | **Total Scan Time** | ~$((($(date +%s) - $(date -d '${{ github.event.created_at }}' +%s)) / 60)) minutes | ✅ |
-          | **Tools Executed** | 8+ security tools | ✅ |
-          | **Parallel Jobs** | 4 concurrent scan categories | ✅ |
-          | **Artifact Generation** | 6 report categories | ✅ |
-          | **SARIF Uploads** | GitHub Security integration | ✅ |
-          
-          ## 🎯 Security Tool Status
-          
-          ### Static Analysis Tools
-          - **Semgrep:** ✅ Comprehensive ruleset execution
-          - **Bandit:** ✅ Python-specific security analysis  
-          - **TruffleHog:** ✅ Secrets detection with git history
-          - **detect-secrets:** ✅ Additional secret pattern matching
-          
-          ### Dynamic & Infrastructure Tools
-          - **Nuclei:** $([ "${{ github.event.inputs.skip_dast }}" != "true" ] && echo "✅ Multi-environment DAST scanning" || echo "⏭️ Skipped per configuration")
-          - **Trivy:** ✅ Dependencies and container scanning
-          - **Checkov:** ✅ Infrastructure as Code validation
-          
-          ## 📊 Integration Health
-          
-          ### GitHub Integration
-          - **Security Tab:** ✅ SARIF results uploaded successfully
-          - **Pull Request Gates:** ✅ Fast feedback operational
-          - **Issue Creation:** ✅ Automated for high/critical findings
-          
-          ### External Integrations  
-          - **Slack Notifications:** $([ -n "${{ env.SLACK_WEBHOOK_URL }}" ] && echo "✅ Active" || echo "⚠️ Not configured")
-          - **JIRA Integration:** $([ -n "${{ env.JIRA_API_TOKEN }}" ] && echo "✅ Active" || echo "⚠️ Not configured")
-          - **Email Alerts:** $([ -n "${{ env.EXECUTIVE_EMAILS }}" ] && echo "✅ Active" || echo "⚠️ Not configured")
-          
-          ## 🔄 Next Scheduled Scans
-          
-          - **Fast Feedback:** Every PR and push to main branches
-          - **Comprehensive:** Weekly (Sundays at 2 AM UTC)  
-          - **Security Pulse:** Daily (6 AM UTC, weekdays)
-          - **Compliance Audit:** Monthly or on-demand
-          - **Incident Response:** On-demand emergency scanning
-          
-          ---
-          *Report auto-generated by Hybrid Security Pipeline*
-          EOF
-
       - name: 📧 Multi-Channel Report Distribution
         if: always()
         run: |
@@ -1578,7 +1128,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": "*Scan Details:*\n• Repository: `${{ github.repository }}`\n• Branch: `${{ github.ref_name }}`\n• Trigger: ${{ github.event_name }}\n• Timestamp: $(date -u '\''%Y-%m-%d %H:%M UTC'\'')"
+                          "text": "*Scan Details:*\n• Repository: `${{ github.repository }}`\n• Branch: `${{ github.ref_name }}`\n• Trigger: ${{ github.event_name }}\n• Timestamp: $(date -u +%Y-%m-%d\ %H:%M\ UTC)"
                         }
                       },
                       {
@@ -1609,20 +1159,7 @@ jobs:
               ${{ env.SLACK_WEBHOOK_URL }} || echo "Slack notification failed"
           fi
           
-          # JIRA integration for high/critical issues
-         # if [ -n "${{ env.JIRA_API_TOKEN }}" ] && [ -n "${{ env.JIRA_BASE_URL }}" ] && ([ "$critical_count" -gt 0 ] || [ "$high_count" -gt 5 ]); then
-          #  echo "Creating JIRA tickets for high-priority security issues..."
-            
-            # Note: Actual JIRA integration would require additional setup
-            # This is a placeholder for the integration logic
-           # echo "JIRA integration would create tickets for:"
-            #echo "- $critical_count critical security issues"
-            #echo "- $high_count high-priority security issues"
-            #echo "- Repository: ${{ github.repository }}"
-            #echo "- Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          #fi
-          
-          #echo "✅ Multi-channel distribution completed"
+          echo "✅ Multi-channel distribution completed"
 
       - name: 📤 Upload Comprehensive Security Reports
         if: always()
@@ -1632,11 +1169,77 @@ jobs:
           path: reports/
           retention-days: ${{ env.REPORT_RETENTION_DAYS }}
 
-      - name: 📤 Upload Analysis Data
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: 📊 Create High-Level Security Issues (Critical/High)
+        if: >
+          always() && 
+          (steps.analysis.outputs.critical-total > 0 || steps.analysis.outputs.high-total > 5)
+        uses: actions/github-script@v7
         with:
-          name: analysis-data
-          path: ./reports/
-          if-no-files-found: warn
+          script: |
+            const criticalCount = '${{ steps.analysis.outputs.critical-total }}';
+            const highCount = '${{ steps.analysis.outputs.high-total }}';
+            const riskLevel = '${{ steps.analysis.outputs.risk-level }}';
+            
+            const title = `🚨 Security Alert: ${riskLevel.toUpperCase()} risk detected`;
+            const body = `## Security Scan Results
+            
+            **Risk Level:** ${riskLevel.toUpperCase()}
+            **Critical Issues:** ${criticalCount}
+            **High Issues:** ${highCount}
+            **Scan Date:** ${new Date().toISOString()}
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ### Immediate Actions Required:
+            - [ ] Review critical security findings in Security tab
+            - [ ] Assess production impact
+            - [ ] Create remediation plan
+            - [ ] Update security team
+            
+            ### Resources:
+            - [Security Tab](${{ github.server_url }}/${{ github.repository }}/security)
+            - [Workflow Results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - Download security reports from workflow artifacts
+            
+            **Auto-generated by Hybrid Security Pipeline**`;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'critical', 'automated']
+            });
 
+      - name: 📋 Workflow Summary Report
+        if: always()
+        run: |
+          critical_count=$(jq '.totals.critical' security-analysis-data.json)
+          high_count=$(jq '.totals.high' security-analysis-data.json)
+          total_count=$(jq '.totals.findings' security-analysis-data.json)
+          risk_level=$(jq -r '.risk_assessment.level' security-analysis-data.json)
+          compliance_score=$(jq '.risk_assessment.compliance_score' security-analysis-data.json)
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 🔒 Security Pipeline Summary
+          
+          ## 📊 Scan Results
+          - **Risk Level:** ${risk_level^^}
+          - **Critical Issues:** $critical_count
+          - **High Issues:** $high_count
+          - **Total Findings:** $total_count
+          - **Compliance Score:** ${compliance_score}%
+          
+          ## 🎯 Security Coverage
+          - ✅ **SAST** - Static Application Security Testing
+          - ✅ **DAST** - Dynamic Application Security Testing  
+          - ✅ **SCA** - Software Composition Analysis
+          - ✅ **Secrets** - Secret Detection & Prevention
+          - ✅ **IaC** - Infrastructure as Code Security
+          
+          ## 📋 Next Steps
+          1. Review detailed findings in [Security Tab](${{ github.server_url }}/${{ github.repository }}/security)
+          2. Download comprehensive reports from workflow artifacts
+          3. $([ $critical_count -gt 0 ] && echo "🚨 **URGENT:** Address critical issues immediately" || echo "✅ Continue routine security monitoring")
+          
+          **Report Generation:** $(date -u '+%Y-%m-%d %H:%M UTC')
+          EOF
