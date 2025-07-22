@@ -6,7 +6,12 @@
 name: 🔒 Hybrid Security Pipeline
 
 on:
-  
+  push:
+    branches: [ "main", "master", "develop" ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/**'
   pull_request:
     branches: [ "main", "master" ]
   schedule:
