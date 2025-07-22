@@ -1632,5 +1632,10 @@ jobs:
           path: reports/
           retention-days: ${{ env.REPORT_RETENTION_DAYS }}
 
-      - name: 📂 Upload Analysis Data
+      - name: 📤 Upload Analysis Data
         if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: analysis-data
+          path: ./reports/
+          if-no-files-found: warn
