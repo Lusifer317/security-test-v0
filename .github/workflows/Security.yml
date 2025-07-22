@@ -709,26 +709,6 @@ jobs:
 # ========================================
 # JOB 4: SECURITY INTELLIGENCE & STANDARDIZED REPORTING
 # ========================================
-  security_intelligence_and_reporting:
-    name: 🧠 Security Intelligence & Reporting
-    runs-on: ubuntu-latest
-    needs: [fast_security_gate, comprehensive_security_scan, dast_security_scan]
-    if: always()
-    timeout-minutes: 20
-    outputs:
-      critical-total: ${{ steps.analysis.outputs.critical-total }}
-      high-total: ${{ steps.analysis.outputs.high-total }}
-      risk-level: ${{ steps.analysis.outputs.risk-level }}
-      compliance-score: ${{ steps.analysis.outputs.compliance-score }}
-    steps:
-      - name: 📋 Checkout for Templates
-        uses: actions/checkout@v4
-
-      - name: 📥 Download All Security Reports
-        uses: actions/download-artifact@v4
-        with:
-          path: all-security-reports
-
       - name: 🧠 Security Intelligence Analysis
         id: analysis
         run: |
@@ -951,8 +931,8 @@ jobs:
           }
           EOF
 
-                  - name: 📊 Generate Executive Security Report
-                    run: |
+      - name: 📊 Generate Executive Security Report
+        run: |
           echo "📊 Generating executive security report..."
           
           # Create default data if missing
