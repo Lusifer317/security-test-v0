@@ -1,8 +1,3 @@
-# ========================================
-# 🔒 HYBRID SECURITY PIPELINE - PRODUCTION READY
-# Complete security scanning with intelligent reporting
-# ========================================
-
 name: 🔒 Hybrid Security Pipeline
 
 on:
@@ -15,46 +10,8 @@ on:
   pull_request:
     branches: [ "main", "master" ]
   schedule:
-    # Comprehensive scan: Sundays at 2 AM UTC
     - cron: '0 2 * * 0'
-    # Quick security pulse: Daily at 6 AM UTC (weekdays only)
-    #- cron: '0 6 * * 1-5'
   workflow_dispatch:
-    inputs:
-      scan_mode:
-        description: 'Scanning mode to execute'
-        required: true
-        default: 'comprehensive'
-        type: choice
-        options:
-        - fast-feedback
-        - comprehensive
-        - incident-response
-        - compliance-audit
-      target_environment:
-        description: 'Target environment for DAST'
-        required: false
-        default: 'staging'
-        type: choice
-        options:
-        - staging
-        - development
-        - production
-        - custom
-      custom_target_url:
-        description: 'Custom URL for DAST scanning'
-        required: false
-        type: string
-      force_full_scan:
-        description: 'Force comprehensive scan even on PR'
-        required: false
-        default: false
-        type: boolean
-      skip_dast:
-        description: 'Skip dynamic security testing'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -65,1197 +22,195 @@ permissions:
   id-token: write
 
 env:
-  # Security Tool Configuration
   SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-  
-  # Environment URLs
   STAGING_URL: ${{ vars.STAGING_URL || 'https://staging.example.com' }}
   DEV_URL: ${{ vars.DEV_URL || 'https://dev.example.com' }}
   PROD_URL: ${{ vars.PRODUCTION_URL || 'https://example.com' }}
-  
-  # Integration Configuration
-  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
-  JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-  JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
-  EXECUTIVE_EMAILS: ${{ secrets.EXECUTIVE_EMAILS }}
-  SECURITY_EMAILS: ${{ secrets.SECURITY_TEAM_EMAILS }}
-  
-  # Scan Configuration
   MAX_SCAN_TIME: '1800'
   CRITICAL_THRESHOLD: '0'
   HIGH_THRESHOLD: '5'
   MEDIUM_THRESHOLD: '20'
-  
-  # Reporting Configuration
   REPORT_RETENTION_DAYS: '180'
-  COMPLIANCE_RETENTION_DAYS: '365'
-  INCIDENT_RETENTION_DAYS: '730'
 
-# ========================================
-# JOB 1: FAST SECURITY GATE
-# ========================================
 jobs:
-  fast_security_gate:
-    name: ⚡ Fast Security Gate
+  semgrep_static_analysis:
+    name: 📝 Semgrep Static Code Analysis
     runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && !contains(github.ref, 'main')) ||
-      github.event.inputs.scan_mode == 'fast-feedback' ||
-      github.event.inputs.force_full_scan == 'true'
-    timeout-minutes: 15
-    outputs:
-      critical-count: ${{ steps.gate.outputs.critical-count }}
-      high-count: ${{ steps.gate.outputs.high-count }}
-      gate-status: ${{ steps.gate.outputs.status }}
-      should-continue: ${{ steps.gate.outputs.continue }}
     steps:
-      - name: 📋 Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 🔍 Semgrep Cloud Fast Scan
-        id: semgrep
-        uses: semgrep/semgrep-action@v1
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
         with:
           publishToken: ${{ env.SEMGREP_APP_TOKEN }}
-          publishDeployment: ${{ github.event_name == 'push' && contains(github.ref, 'main') && '1' || '0' }}
           generateSarif: "1"
-          auditOn: push
-        continue-on-error: true
-        env:
-          SEMGREP_TIMEOUT: "300"
-
-      - name: 📊 Security Gate Analysis
-        id: gate
-        run: |
-          echo "🔍 Evaluating fast security gate..."
-          
-          critical_count=0
-          high_count=0
-          medium_count=0
-          
-          # Parse Semgrep SARIF results
-          if [ -f "semgrep.sarif" ]; then
-            critical_count=$(jq '[.runs[].results[] | select(.level == "error" and (.properties.severity // .level) == "error")] | length' semgrep.sarif 2>/dev/null || echo "0")
-            high_count=$(jq '[.runs[].results[] | select(.level == "warning" and (.properties.severity // "high") == "high")] | length' semgrep.sarif 2>/dev/null || echo "0")
-            medium_count=$(jq '[.runs[].results[] | select(.level == "note" or (.properties.severity // "medium") == "medium")] | length' semgrep.sarif 2>/dev/null || echo "0")
-          fi
-          
-          echo "📊 Fast scan results:"
-          echo "   Critical: $critical_count (threshold: $CRITICAL_THRESHOLD)"
-          echo "   High: $high_count (threshold: $HIGH_THRESHOLD)"
-          echo "   Medium: $medium_count"
-          
-          # Set outputs
-          echo "critical-count=$critical_count" >> $GITHUB_OUTPUT
-          echo "high-count=$high_count" >> $GITHUB_OUTPUT
-          echo "medium-count=$medium_count" >> $GITHUB_OUTPUT
-          
-          # Gate decision logic
-          if [ "$critical_count" -gt "$CRITICAL_THRESHOLD" ]; then
-            echo "status=blocked" >> $GITHUB_OUTPUT
-            echo "continue=false" >> $GITHUB_OUTPUT
-            echo "❌ Security gate BLOCKED: $critical_count critical issues (max: $CRITICAL_THRESHOLD)"
-            
-            # Create blocking summary
-            cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## ❌ Security Gate: BLOCKED
-          
-          **Critical Issues Found:** $critical_count (Threshold: $CRITICAL_THRESHOLD)
-          
-          ### Immediate Action Required
-          - Review and fix all critical security findings
-          - Critical issues must be resolved before merge
-          - Check the Security tab for detailed findings
-          
-          **Status:** 🚫 MERGE BLOCKED
-          EOF
-            exit 1
-            
-          elif [ "$high_count" -gt "$HIGH_THRESHOLD" ]; then
-            echo "status=warning" >> $GITHUB_OUTPUT
-            echo "continue=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Security gate WARNING: $high_count high issues (max: $HIGH_THRESHOLD)"
-            
-          else
-            echo "status=passed" >> $GITHUB_OUTPUT  
-            echo "continue=true" >> $GITHUB_OUTPUT
-            echo "✅ Security gate PASSED: Issues within acceptable thresholds"
-          fi
-          
-          # Create success/warning summary
-          if [ "$critical_count" -le "$CRITICAL_THRESHOLD" ]; then
-            cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## ✅ Security Gate: $([ "$high_count" -gt "$HIGH_THRESHOLD" ] && echo "WARNING" || echo "PASSED")
-          
-          **Security Scan Results:**
-          - Critical: $critical_count
-          - High: $high_count  
-          - Medium: $medium_count
-          
-          $([ "$high_count" -gt "$HIGH_THRESHOLD" ] && echo "⚠️ **Warning:** High issue count above threshold. Consider review before merge." || echo "✅ **Status:** Ready for review")
-          EOF
-          fi
-
-      - name: 📤 Upload Fast Scan Results
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: semgrep.sarif
-          category: fast-security-gate
-
-      - name: 💬 Update PR Status
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const status = '${{ steps.gate.outputs.status }}' || 'unknown';
-            const critical = '${{ steps.gate.outputs.critical-count }}' || '0';
-            const high = '${{ steps.gate.outputs.high-count }}' || '0';
-            const medium = '${{ steps.gate.outputs.medium-count }}' || '0';
-            
-            const statusEmoji = {
-              'passed': '✅',
-              'warning': '⚠️', 
-              'blocked': '❌',
-              'unknown': '🔍'
-            };
-            
-            const emoji = statusEmoji[status] || '🔍';
-            
-            const body = `## ${emoji} Fast Security Gate Results
-            
-            **Status:** ${status.toUpperCase()}
-            
-            | Severity | Count | Threshold | Status |
-            |----------|-------|-----------|---------|
-            | Critical | ${critical} | ${process.env.CRITICAL_THRESHOLD} | ${critical > process.env.CRITICAL_THRESHOLD ? '❌' : '✅'} |
-            | High | ${high} | ${process.env.HIGH_THRESHOLD} | ${high > process.env.HIGH_THRESHOLD ? '⚠️' : '✅'} |
-            | Medium | ${medium} | ${process.env.MEDIUM_THRESHOLD} | ${medium > process.env.MEDIUM_THRESHOLD ? '⚠️' : '✅'} |
-            
-            ${status === 'blocked' ? 
-              '🚨 **Action Required:** Critical issues must be fixed before merge.' :
-              status === 'warning' ?
-              '⚠️ **Review Recommended:** High issue count detected.' :
-              '✅ **Ready for Review:** Security checks passed.'
-            }
-            
-            📊 **View Details:** [Security Tab](${context.payload.repository.html_url}/security)
-            🔬 **Full Scan:** Will run after merge to main branch.`;
-            
-            // Update or create PR comment
-            const { data: comments } = await github.rest.issues.listComments({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && comment.body.includes('Fast Security Gate Results')
-            );
-            
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                comment_id: botComment.id,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            }
-
-# ========================================
-# JOB 2: COMPREHENSIVE SECURITY ANALYSIS
-# ========================================
-  comprehensive_security_scan:
-    name: 🔬 Comprehensive Security Analysis
-    runs-on: ubuntu-latest
-    if: >
-      (needs.fast_security_gate.outputs.should-continue == 'true' || always()) &&
-      (github.event_name == 'schedule' ||
-       github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'push' && contains(github.ref, 'main')) ||
-       github.event.inputs.force_full_scan == 'true')
-    needs: [fast_security_gate]
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        scan_category:
-          - name: "sast_advanced"
-            description: "Advanced Static Analysis"
-            timeout: "30"
-          - name: "secrets_deep"
-            description: "Deep Secrets Scanning" 
-            timeout: "15"
-          - name: "dependencies"
-            description: "Dependency Vulnerabilities"
-            timeout: "20"
-          - name: "infrastructure"
-            description: "Infrastructure Security"
-            timeout: "25"
-    steps:
-      - name: 📋 Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 🔧 Setup Security Tools
+          category: semgrep-static
+      - name: Archive Semgrep JSON Results
         run: |
-          echo "🔧 Setting up security toolchain for ${{ matrix.scan_category.name }}..."
-          
-          # Install base tools
-          python -m pip install --upgrade pip
-          pip install semgrep bandit safety detect-secrets
-          
-          # Install Go-based tools
-          go install -v github.com/trufflesecurity/trufflehog/v3@latest
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          
-          # Docker-based tools availability check
-          docker --version
-          
-          echo "✅ Security tools installed for ${{ matrix.scan_category.description }}"
-
-      - name: 🔍 Execute Security Scan
-        timeout-minutes: ${{ matrix.scan_category.timeout }}
-        run: |
-          echo "🔍 Running ${{ matrix.scan_category.description }}..."
-          mkdir -p security-reports/${{ matrix.scan_category.name }}
-          
-          case "${{ matrix.scan_category.name }}" in
-            "sast_advanced")
-              echo "Running advanced SAST analysis..."
-              
-              # Comprehensive Semgrep scan
-              semgrep \
-                --config="p/security-audit" \
-                --config="p/owasp-top-ten" \
-                --config="p/cwe-top-25" \
-                --config="p/r2c-security-audit" \
-                --config="p/secrets" \
-                --sarif \
-                --json \
-                --output=security-reports/sast_advanced/semgrep-comprehensive.sarif \
-                --json-output=security-reports/sast_advanced/semgrep-comprehensive.json \
-                --metrics=off \
-                --timeout=1200 \
-                --max-target-bytes=50000000 \
-                --verbose || echo "Semgrep completed with warnings"
-              
-              # Bandit for Python
-              if find . -name "*.py" -type f | head -1 | grep -q .; then
-                echo "Running Bandit for Python security..."
-                bandit -r . -f json -o security-reports/sast_advanced/bandit-results.json -ll || echo "Bandit completed"
-                bandit -r . -f sarif -o security-reports/sast_advanced/bandit-results.sarif -ll || echo "Bandit SARIF completed"
-              fi
-              
-              # Code quality and security metrics
-              echo "Generating SAST summary..."
-              echo '{"scan_type": "sast_advanced", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "status": "completed"}' > security-reports/sast_advanced/scan-metadata.json
-              ;;
-              
-            "secrets_deep")
-              echo "Running comprehensive secrets detection..."
-              
-              # TruffleHog for secrets
-              trufflehog git file://. \
-                --json \
-                --output=security-reports/secrets_deep/trufflehog-results.json \
-                --no-update || echo "TruffleHog completed"
-              
-              # detect-secrets for additional coverage
-              detect-secrets scan --all-files --disable-plugin AbsolutePathDetectorPlugin \
-                --baseline security-reports/secrets_deep/secrets-baseline.json || echo "detect-secrets completed"
-              
-              # Semgrep secrets-specific rules
-              semgrep \
-                --config="p/secrets" \
-                --config="r/generic.secrets" \
-                --json \
-                --output=security-reports/secrets_deep/semgrep-secrets.json \
-                --metrics=off || echo "Semgrep secrets scan completed"
-              
-              echo '{"scan_type": "secrets_deep", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "status": "completed"}' > security-reports/secrets_deep/scan-metadata.json
-              ;;
-              
-            "dependencies")
-              echo "Running comprehensive dependency analysis..."
-              
-              # Trivy filesystem scan
-              docker run --rm -v "$(pwd):/workspace" \
-                aquasec/trivy:latest fs \
-                --format sarif \
-                --output /workspace/security-reports/dependencies/trivy-fs.sarif \
-                --timeout 15m \
-                /workspace || echo "Trivy FS scan completed"
-              
-              docker run --rm -v "$(pwd):/workspace" \
-                aquasec/trivy:latest fs \
-                --format json \
-                --output /workspace/security-reports/dependencies/trivy-fs.json \
-                /workspace || echo "Trivy JSON completed"
-              
-              # Language-specific dependency scans
-              if [ -f "package.json" ]; then
-                echo "Scanning Node.js dependencies..."
-                npm audit --audit-level=low --json > security-reports/dependencies/npm-audit.json 2>/dev/null || echo "NPM audit completed"
-              fi
-              
-              if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
-                echo "Scanning Python dependencies..."
-                safety check --json --output security-reports/dependencies/safety-results.json || echo "Safety scan completed"
-                pip-audit --format=json --output=security-reports/dependencies/pip-audit.json || echo "pip-audit completed"
-              fi
-              
-              if [ -f "go.mod" ]; then
-                echo "Scanning Go dependencies..."
-                go list -json -deps ./... > security-reports/dependencies/go-deps.json || echo "Go deps listed"
-                # govulncheck if available
-                command -v govulncheck >/dev/null && govulncheck -json ./... > security-reports/dependencies/govulncheck.json || echo "govulncheck not available"
-              fi
-              
-              if [ -f "Cargo.toml" ]; then
-                echo "Scanning Rust dependencies..."
-                cargo audit --json > security-reports/dependencies/cargo-audit.json || echo "Cargo audit completed"
-              fi
-              
-              echo '{"scan_type": "dependencies", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "status": "completed"}' > security-reports/dependencies/scan-metadata.json
-              ;;
-              
-            "infrastructure")
-              echo "Running infrastructure security analysis..."
-              
-              # Docker configuration scanning
-              if [ -f "Dockerfile" ] || find . -name "*.dockerfile" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" | grep -q .; then
-                echo "Scanning Docker configurations..."
-                docker run --rm -v "$(pwd):/workspace" \
-                  aquasec/trivy:latest config \
-                  --format sarif \
-                  --output /workspace/security-reports/infrastructure/trivy-docker.sarif \
-                  /workspace || echo "Docker config scan completed"
-              fi
-              
-              # Kubernetes manifests scanning
-              if find . -name "*.yaml" -o -name "*.yml" | head -10 | xargs grep -l -E "(apiVersion|kind)" | grep -q .; then
-                echo "Scanning Kubernetes manifests..."
-                docker run --rm -v "$(pwd):/workspace" \
-                  aquasec/trivy:latest config \
-                  --format json \
-                  --output /workspace/security-reports/infrastructure/k8s-security.json \
-                  /workspace || echo "K8s scan completed"
-              fi
-              
-              # Terraform/Infrastructure as Code scanning
-              if find . -name "*.tf" -o -name "*.hcl" | grep -q .; then
-                echo "Scanning Terraform configurations..."
-                docker run --rm -v "$(pwd):/workspace" \
-                  bridgecrew/checkov:latest -d /workspace \
-                  --output sarif \
-                  --output-file-path /workspace/security-reports/infrastructure/checkov.sarif || echo "Checkov completed"
-                
-                docker run --rm -v "$(pwd):/workspace" \
-                  bridgecrew/checkov:latest -d /workspace \
-                  --output json \
-                  --output-file-path /workspace/security-reports/infrastructure/checkov.json || echo "Checkov JSON completed"
-              fi
-              
-              # Cloud configuration scanning (AWS, Azure, GCP)
-              if find . -name "*.yml" -o -name "*.yaml" | xargs grep -l -E "(AWSTemplateFormatVersion|Resources)" | grep -q .; then
-                echo "Scanning CloudFormation templates..."
-                docker run --rm -v "$(pwd):/workspace" \
-                  bridgecrew/checkov:latest -d /workspace \
-                  --framework cloudformation \
-                  --output json \
-                  --output-file-path /workspace/security-reports/infrastructure/cloudformation-scan.json || echo "CloudFormation scan completed"
-              fi
-              
-              echo '{"scan_type": "infrastructure", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "status": "completed"}' > security-reports/infrastructure/scan-metadata.json
-              ;;
-          esac
-          
-          echo "✅ ${{ matrix.scan_category.description }} completed"
-
-      - name: 📤 Upload Security Scan Results
-        if: always()
+          mkdir -p reports/semgrep
+          if [ -f semgrep.json ]; then
+            cp semgrep.json reports/semgrep/
+          fi
+      - name: Upload Semgrep reports artifact
         uses: actions/upload-artifact@v4
         with:
-          name: security-scan-${{ matrix.scan_category.name }}
-          path: security-reports/${{ matrix.scan_category.name }}/
-          retention-days: ${{ env.REPORT_RETENTION_DAYS }}
+          name: semgrep-report
+          path: reports/semgrep/
+          retention-days: 30
 
-      - name: 📊 Upload SARIF to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: security-reports/${{ matrix.scan_category.name }}/*.sarif
-          category: comprehensive-${{ matrix.scan_category.name }}
-        continue-on-error: true
-
-# ========================================
-# JOB 3: DYNAMIC APPLICATION SECURITY TESTING  
-# ========================================
-  dast_security_scan:
-    name: 🌐 Dynamic Security Testing
+  dast_nuclei_scan:
+    name: 🌐 Nuclei DAST Scan
     runs-on: ubuntu-latest
-    if: >
-      !github.event.inputs.skip_dast &&
-      (needs.fast_security_gate.outputs.should-continue == 'true' || always()) &&
-      (github.event_name == 'schedule' ||
-       github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'push' && contains(github.ref, 'main')))
-    needs: [fast_security_gate]
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        environment:
-          - name: "staging"
-            url_var: "STAGING_URL"
-            risk_level: "medium"
-            max_templates: 100
-          - name: "development"  
-            url_var: "DEV_URL"
-            risk_level: "high"
-            max_templates: 200
+    needs: semgrep_static_analysis
     steps:
-      - name: 📋 Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: 🔧 Setup DAST Tools
+      - name: Setup Nuclei
         run: |
-          echo "🔧 Setting up dynamic security testing tools..."
-          
-          # Install Nuclei and related tools
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-          
-          # Update Nuclei templates
-          nuclei -update-templates -silent
-          
-          echo "✅ DAST tools ready for ${{ matrix.environment.name }} environment"
-
-      - name: 🎯 Determine Target URL
+          nuclei -update-templates
+      - name: Define Target and Validate
         id: target
         run: |
-          echo "🎯 Determining target URL for ${{ matrix.environment.name }} environment..."
-          
-          case "${{ matrix.environment.name }}" in
-            "staging")
-              target_url="${{ env.STAGING_URL }}"
-              ;;
-            "development")
-              target_url="${{ env.DEV_URL }}"
-              ;;
-            "production")
-              target_url="${{ env.PROD_URL }}"
-              ;;
-            "custom")
-              target_url="${{ github.event.inputs.custom_target_url }}"
-              ;;
-          esac
-          
-          # Validate URL
-          if [[ "$target_url" == *"example.com"* ]] || [[ -z "$target_url" ]] || [[ "$target_url" == "https://" ]]; then
+          TARGET="${{ env.STAGING_URL }}"
+          if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Skipping DAST scan - invalid/placeholder URL: $target_url"
-            echo "Configure proper URLs in repository variables or secrets"
           else
-            # Test URL accessibility
-            if curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$target_url" | grep -qE "^[2-3][0-9][0-9]$"; then
-              echo "skip=false" >> $GITHUB_OUTPUT
-              echo "url=$target_url" >> $GITHUB_OUTPUT
-              echo "✅ Target URL validated and accessible: $target_url"
-            else
-              echo "skip=true" >> $GITHUB_OUTPUT
-              echo "⚠️ Skipping DAST scan - URL not accessible: $target_url"
-            fi
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "target=$TARGET" >> $GITHUB_OUTPUT
           fi
-
-      - name: 🕷️ Web Application Discovery
+      - name: Run Nuclei Scan
         if: steps.target.outputs.skip != 'true'
         run: |
-          echo "🕷️ Starting web application discovery for ${{ steps.target.outputs.url }}"
-          mkdir -p dast-reports/${{ matrix.environment.name }}
-          
-          # HTTP probing and technology detection
-          echo "${{ steps.target.outputs.url }}" | httpx -silent -status-code -title -tech-detect -json -o dast-reports/${{ matrix.environment.name }}/httpx-probe.json
-          
-          # Basic crawling for additional endpoints (limited scope)
-          echo "${{ steps.target.outputs.url }}" | katana -silent -json -o dast-reports/${{ matrix.environment.name }}/katana-crawl.json -depth 2 -js-crawl -known-files all -timeout 30 || echo "Katana crawl completed"
-          
-          echo "✅ Web application discovery completed"
-
-      - name: 🛡️ Comprehensive Nuclei Security Scan
-        if: steps.target.outputs.skip != 'true'
-        run: |
-          echo "🛡️ Starting comprehensive security scan for ${{ steps.target.outputs.url }}"
-          
-          # Comprehensive Nuclei scan with multiple template categories
-          nuclei \
-            -target "${{ steps.target.outputs.url }}" \
-            -tags "cve,vuln,misconfig,exposure,auth,injection,xss,sqli,rce,lfi,rfi,ssrf,xxe,path-traversal,redirect,smuggling,deserialization" \
+          mkdir -p reports/nuclei
+          nuclei -target "${{ steps.target.outputs.target }}" \
             -severity critical,high,medium,low,info \
             -rate-limit 10 \
             -timeout 30 \
-            -retries 2 \
-            -max-host-error 10 \
             -json \
-            -output dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json \
-            -sarif-export dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.sarif \
-            -stats \
+            -output reports/nuclei/nuclei-findings.json \
+            -sarif-export reports/nuclei/nuclei-findings.sarif \
             -silent
-          
-          # Additional focused scans for common vulnerabilities
-          echo "Running targeted vulnerability scans..."
-          
-          # OWASP Top 10 focused scan
-          nuclei \
-            -target "${{ steps.target.outputs.url }}" \
-            -tags "owasp,top10" \
-            -severity critical,high \
-            -json \
-            -output dast-reports/${{ matrix.environment.name }}/nuclei-owasp-top10.json \
-            -silent || echo "OWASP scan completed"
-          
-          # Technology-specific scans based on discovery
-          if [ -f "dast-reports/${{ matrix.environment.name }}/httpx-probe.json" ]; then
-            # Extract detected technologies and run targeted scans
-            tech_detected=$(jq -r '.tech[]?' dast-reports/${{ matrix.environment.name }}/httpx-probe.json 2>/dev/null | head -5 | tr '\n' ',' | sed 's/,$//')
-            if [ -n "$tech_detected" ]; then
-              echo "Running technology-specific scans for: $tech_detected"
-              nuclei \
-                -target "${{ steps.target.outputs.url }}" \
-                -tags "$tech_detected" \
-                -json \
-                -output dast-reports/${{ matrix.environment.name }}/nuclei-tech-specific.json \
-                -silent || echo "Tech-specific scan completed"
-            fi
-          fi
-          
-          echo "✅ Comprehensive security scanning completed"
-
-      - name: 📊 DAST Results Analysis
+      - name: Upload SARIF results
         if: steps.target.outputs.skip != 'true'
-        run: |
-          echo "📊 Analyzing DAST results..."
-          
-          # Count findings by severity
-          critical_count=0
-          high_count=0
-          medium_count=0
-          low_count=0
-          info_count=0
-          
-          if [ -f "dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json" ]; then
-            critical_count=$(jq '[.[] | select(.info.severity == "critical")] | length' dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json 2>/dev/null || echo "0")
-            high_count=$(jq '[.[] | select(.info.severity == "high")] | length' dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json 2>/dev/null || echo "0")
-            medium_count=$(jq '[.[] | select(.info.severity == "medium")] | length' dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json 2>/dev/null || echo "0")
-            low_count=$(jq '[.[] | select(.info.severity == "low")] | length' dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json 2>/dev/null || echo "0")
-            info_count=$(jq '[.[] | select(.info.severity == "info")] | length' dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.json 2>/dev/null || echo "0")
-          fi
-          
-          # Create DAST summary
-          cat > dast-reports/${{ matrix.environment.name }}/dast-summary.json << EOF
-          {
-            "environment": "${{ matrix.environment.name }}",
-            "target_url": "${{ steps.target.outputs.url }}",
-            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "findings": {
-              "critical": $critical_count,
-              "high": $high_count,
-              "medium": $medium_count,
-              "low": $low_count,
-              "info": $info_count,
-              "total": $((critical_count + high_count + medium_count + low_count + info_count))
-            },
-            "risk_assessment": "$([ "$critical_count" -gt 0 ] && echo "critical" || [ "$high_count" -gt 5 ] && echo "high" || [ "$high_count" -gt 0 ] && echo "medium" || echo "low")"
-          }
-          EOF
-          
-          echo "📊 DAST Analysis Summary for ${{ matrix.environment.name }}:"
-          echo "   Critical: $critical_count"
-          echo "   High: $high_count"
-          echo "   Medium: $medium_count"
-          echo "   Low: $low_count"
-          echo "   Info: $info_count"
-          echo "   Total: $((critical_count + high_count + medium_count + low_count + info_count))"
-
-      - name: 📤 Upload DAST Results to GitHub Security
-        if: steps.target.outputs.skip != 'true' && always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: dast-reports/${{ matrix.environment.name }}/nuclei-comprehensive.sarif
-          category: dast-${{ matrix.environment.name }}
-
-      - name: 📂 Upload DAST Artifacts
-        if: always()
+          sarif_file: reports/nuclei/nuclei-findings.sarif
+          category: nuclei-dast
+      - name: Upload Nuclei artifact
+        if: steps.target.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: dast-results-${{ matrix.environment.name }}
-          path: dast-reports/${{ matrix.environment.name }}/
-          retention-days: ${{ env.REPORT_RETENTION_DAYS }}
+          name: nuclei-report
+          path: reports/nuclei/
+          retention-days: 30
 
-# ========================================
-# JOB 4: SECURITY INTELLIGENCE & STANDARDIZED REPORTING
-# ========================================
-  security_intelligence_and_reporting:
-    name: 🧠 Security Intelligence & Reporting
+  intelligence_reporting:
+    name: 📊 Intelligence & Clean Reporting
     runs-on: ubuntu-latest
-    needs: [fast_security_gate, comprehensive_security_scan, dast_security_scan]
-    if: always()
-    timeout-minutes: 20
-    outputs:
-      critical-total: ${{ steps.analysis.outputs.critical-total }}
-      high-total: ${{ steps.analysis.outputs.high-total }}
-      risk-level: ${{ steps.analysis.outputs.risk-level }}
-      compliance-score: ${{ steps.analysis.outputs.compliance-score }}
+    needs: [semgrep_static_analysis, dast_nuclei_scan]
     steps:
-      - name: 📋 Checkout for Templates
-        uses: actions/checkout@v4
-
-      - name: 📥 Download All Security Reports
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: all-security-reports
-
-      - name: 🧠 Security Intelligence Analysis
-        id: analysis
+          path: reports
+      - name: Summarize Security Results
         run: |
-          echo "🧠 Performing comprehensive security intelligence analysis..."
-          
-          # Initialize counters and data structures
+          echo "📊 Generating security report..."
+
+          set -e
+
+          # Default values
           total_critical=0
           total_high=0
           total_medium=0
-          total_low=0
           total_findings=0
-          
-          # Analysis categories
-          declare -A category_findings
-          declare -A category_critical
-          declare -A category_high
-          
-          # Process SAST results
-          echo "📊 Analyzing Static Analysis results..."
-          for category in sast_advanced secrets_deep dependencies infrastructure; do
-            category_findings["$category"]=0
-            category_critical["$category"]=0
-            category_high["$category"]=0
-            
-            if [ -d "all-security-reports/security-scan-$category" ]; then
-              # Process JSON results
-              for json_file in $(find "all-security-reports/security-scan-$category" -name "*.json" -type f 2>/dev/null || true); do
-                if [ -s "$json_file" ]; then
-                  filename=$(basename "$json_file")
-                  case "$filename" in
-                    *semgrep*)
-                      if jq -e '.results' "$json_file" >/dev/null 2>&1; then
-                        findings=$(jq '.results | length' "$json_file" 2>/dev/null || echo "0")
-                        critical=$(jq '[.results[] | select(.extra.severity == "ERROR" or .extra.severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo "0")
-                        high=$(jq '[.results[] | select(.extra.severity == "WARNING" or .extra.severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo "0")
-                        
-                        category_findings["$category"]=$((${category_findings["$category"]} + findings))
-                        category_critical["$category"]=$((${category_critical["$category"]} + critical))
-                        category_high["$category"]=$((${category_high["$category"]} + high))
-                      fi
-                      ;;
-                    *bandit*)
-                      if jq -e '.results' "$json_file" >/dev/null 2>&1; then
-                        findings=$(jq '.results | length' "$json_file" 2>/dev/null || echo "0")
-                        high=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo "0")
-                        category_findings["$category"]=$((${category_findings["$category"]} + findings))
-                        category_high["$category"]=$((${category_high["$category"]} + high))
-                      fi
-                      ;;
-                    *trufflehog*)
-                      if jq -e '.[]' "$json_file" >/dev/null 2>&1; then
-                        findings=$(jq 'length' "$json_file" 2>/dev/null || echo "0")
-                        category_findings["$category"]=$((${category_findings["$category"]} + findings))
-                        category_critical["$category"]=$((${category_critical["$category"]} + findings)) # Secrets are critical
-                      fi
-                      ;;
-                    *trivy*)
-                      if jq -e '.Results' "$json_file" >/dev/null 2>&1; then
-                        critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo "0")
-                        high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo "0")
-                        medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$json_file" 2>/dev/null || echo "0")
-                        
-                        category_findings["$category"]=$((${category_findings["$category"]} + critical + high + medium))
-                        category_critical["$category"]=$((${category_critical["$category"]} + critical))
-                        category_high["$category"]=$((${category_high["$category"]} + high))
-                      fi
-                      ;;
-                  esac
-                fi
-              done
-              
-              # Process SARIF results for additional context
-              for sarif_file in $(find "all-security-reports/security-scan-$category" -name "*.sarif" -type f 2>/dev/null || true); do
-                if [ -s "$sarif_file" ] && jq -e '.runs' "$sarif_file" >/dev/null 2>&1; then
-                  sarif_findings=$(jq '[.runs[].results[]] | length' "$sarif_file" 2>/dev/null || echo "0")
-                  category_findings["$category"]=$((${category_findings["$category"]} + sarif_findings))
-                fi
-              done
-            fi
-            
-            echo "   $category: ${category_findings["$category"]} findings (${category_critical["$category"]} critical, ${category_high["$category"]} high)"
-          done
-          
-          # Process DAST results
-          echo "📊 Analyzing Dynamic Analysis results..."
-          dast_critical=0
-          dast_high=0
-          dast_total=0
-          
-          for env in staging development; do
-            if [ -d "all-security-reports/dast-results-$env" ]; then
-              for json_file in $(find "all-security-reports/dast-results-$env" -name "*.json" -type f 2>/dev/null || true); do
-                if [ -s "$json_file" ]; then
-                  filename=$(basename "$json_file")
-                  case "$filename" in
-                    *nuclei*)
-                      if jq -e '.[]' "$json_file" >/dev/null 2>&1; then
-                        critical=$(jq '[.[] | select(.info.severity == "critical")] | length' "$json_file" 2>/dev/null || echo "0")
-                        high=$(jq '[.[] | select(.info.severity == "high")] | length' "$json_file" 2>/dev/null || echo "0")
-                        total=$(jq 'length' "$json_file" 2>/dev/null || echo "0")
-                        
-                        dast_critical=$((dast_critical + critical))
-                        dast_high=$((dast_high + high))
-                        dast_total=$((dast_total + total))
-                      fi
-                      ;;
-                    *dast-summary*)
-                      if jq -e '.findings' "$json_file" >/dev/null 2>&1; then
-                        critical=$(jq '.findings.critical // 0' "$json_file")
-                        high=$(jq '.findings.high // 0' "$json_file")
-                        total=$(jq '.findings.total // 0' "$json_file")
-                        
-                        dast_critical=$((dast_critical + critical))
-                        dast_high=$((dast_high + high))
-                        dast_total=$((dast_total + total))
-                      fi
-                      ;;
-                  esac
-                fi
-              done
-            fi
-          done
-          
-          echo "   DAST: $dast_total findings ($dast_critical critical, $dast_high high)"
-          
-          # Calculate totals
-          for category in sast_advanced secrets_deep dependencies infrastructure; do
-            total_critical=$((total_critical + ${category_critical["$category"]}))
-            total_high=$((total_high + ${category_high["$category"]}))
-            total_findings=$((total_findings + ${category_findings["$category"]}))
-          done
-          
-          total_critical=$((total_critical + dast_critical))
-          total_high=$((total_high + dast_high))
-          total_findings=$((total_findings + dast_total))
-          
+
+          # Semgrep findings
+          if [ -f reports/semgrep/semgrep.json ]; then
+            total_critical_semgrep=$(jq '[.results[] | select(.extra.severity == "ERROR" or .extra.severity == "CRITICAL")] | length' reports/semgrep/semgrep.json 2>/dev/null || echo "0")
+            total_high_semgrep=$(jq '[.results[] | select(.extra.severity == "WARNING" or .extra.severity == "HIGH")] | length' reports/semgrep/semgrep.json 2>/dev/null || echo "0")
+            total_medium_semgrep=$(jq '[.results[] | select(.extra.severity == "MEDIUM")] | length' reports/semgrep/semgrep.json 2>/dev/null || echo "0")
+            total_findings_semgrep=$(jq '.results | length' reports/semgrep/semgrep.json 2>/dev/null || echo "0")
+          else
+            total_critical_semgrep=0
+            total_high_semgrep=0
+            total_medium_semgrep=0
+            total_findings_semgrep=0
+          fi
+
+          # Nuclei findings
+          if [ -f reports/nuclei/nuclei-findings.json ]; then
+            total_critical_nuclei=$(jq '[.[] | select(.info.severity == "critical")] | length' reports/nuclei/nuclei-findings.json 2>/dev/null || echo "0")
+            total_high_nuclei=$(jq '[.[] | select(.info.severity == "high")] | length' reports/nuclei/nuclei-findings.json 2>/dev/null || echo "0")
+            total_medium_nuclei=$(jq '[.[] | select(.info.severity == "medium")] | length' reports/nuclei/nuclei-findings.json 2>/dev/null || echo "0")
+            total_findings_nuclei=$(jq 'length' reports/nuclei/nuclei-findings.json 2>/dev/null || echo "0")
+          else
+            total_critical_nuclei=0
+            total_high_nuclei=0
+            total_medium_nuclei=0
+            total_findings_nuclei=0
+          fi
+
+          # Totals
+          total_critical=$((total_critical_semgrep + total_critical_nuclei))
+          total_high=$((total_high_semgrep + total_high_nuclei))
+          total_medium=$((total_medium_semgrep + total_medium_nuclei))
+          total_findings=$((total_findings_semgrep + total_findings_nuclei))
+
           # Risk assessment
           if [ "$total_critical" -gt 0 ]; then
-            risk_level="critical"
-            risk_description="CRITICAL - Immediate remediation required"
-          elif [ "$total_high" -gt 10 ]; then
-            risk_level="high"
-            risk_description="HIGH - Priority remediation needed"
+            risk_level="CRITICAL"
+            risk_symbol="🚨"
+          elif [ "$total_high" -gt 5 ]; then
+            risk_level="HIGH"
+            risk_symbol="⚠️"
           elif [ "$total_high" -gt 0 ]; then
-            risk_level="medium"
-            risk_description="MEDIUM - Schedule remediation"
+            risk_level="MEDIUM"
+            risk_symbol="🟡"
           else
-            risk_level="low"
-            risk_description="LOW - Routine monitoring"
+            risk_level="LOW"
+            risk_symbol="✅"
           fi
-          
+
           # Compliance scoring
           compliance_deductions=0
           compliance_deductions=$((compliance_deductions + total_critical * 10))
           compliance_deductions=$((compliance_deductions + total_high * 3))
           compliance_score=$((100 - compliance_deductions))
           [ $compliance_score -lt 0 ] && compliance_score=0
-          
-          # Set outputs
-          echo "critical-total=$total_critical" >> $GITHUB_OUTPUT
-          echo "high-total=$total_high" >> $GITHUB_OUTPUT
-          echo "medium-total=$total_medium" >> $GITHUB_OUTPUT
-          echo "total-findings=$total_findings" >> $GITHUB_OUTPUT
-          echo "risk-level=$risk_level" >> $GITHUB_OUTPUT
-          echo "compliance-score=$compliance_score" >> $GITHUB_OUTPUT
-          
-          echo "🧠 Intelligence Analysis Summary:"
-          echo "   Total Critical: $total_critical"
-          echo "   Total High: $total_high"  
-          echo "   Total Findings: $total_findings"
-          echo "   Risk Level: $risk_level"
-          echo "   Compliance Score: $compliance_score%"
-          
-          # Store analysis data for reporting
-          cat > security-analysis-data.json << EOF
-          {
-            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "repository": "${{ github.repository }}",
-            "branch": "${{ github.ref_name }}",
-            "workflow_run": "${{ github.run_id }}",
-            "scan_trigger": "${{ github.event_name }}",
-            "totals": {
-              "critical": $total_critical,
-              "high": $total_high,
-              "medium": $total_medium,
-              "findings": $total_findings
-            },
-            "categories": {
-              "sast_advanced": {
-                "findings": ${category_findings["sast_advanced"]},
-                "critical": ${category_critical["sast_advanced"]},
-                "high": ${category_high["sast_advanced"]}
-              },
-              "secrets_deep": {
-                "findings": ${category_findings["secrets_deep"]},
-                "critical": ${category_critical["secrets_deep"]},
-                "high": ${category_high["secrets_deep"]}
-              },
-              "dependencies": {
-                "findings": ${category_findings["dependencies"]},
-                "critical": ${category_critical["dependencies"]},
-                "high": ${category_high["dependencies"]}
-              },
-              "infrastructure": {
-                "findings": ${category_findings["infrastructure"]},
-                "critical": ${category_critical["infrastructure"]},
-                "high": ${category_high["infrastructure"]}
-              },
-              "dast": {
-                "findings": $dast_total,
-                "critical": $dast_critical,
-                "high": $dast_high
-              }
-            },
-            "risk_assessment": {
-              "level": "$risk_level",
-              "description": "$risk_description",
-              "compliance_score": $compliance_score
-            }
-          }
+
+          # Create report
+          mkdir -p reports/final
+          cat > reports/final/security-report.md <<EOF
+          # 🔒 Security Pipeline Report
+
+          ## ${risk_symbol} Risk Level: ${risk_level}
+          - **Critical Issues:** $total_critical
+          - **High Issues:** $total_high
+          - **Medium Issues:** $total_medium
+          - **Total Findings:** $total_findings
+          - **Compliance Score:** $compliance_score%
+
+          ## **Recommended Actions**
+          $( [ "$total_critical" -gt 0 ] && echo "- Address all critical issues immediately." || echo "- No critical issues found." )
+          $( [ "$total_high" -gt 5 ] && echo "- Prioritize all high and medium severity issues." || echo "- Review all high and medium severity issues within 1 week." )
+
+          ## **Summary**
+          - Full Semgrep and Nuclei vulnerability scan on latest commit.
+          - SARIF results uploaded to GitHub Security tab for review.
+          - Detailed findings available as workflow artifacts.
+
+          **Report generated on:** $(date -u '+%Y-%m-%d %H:%M UTC')
           EOF
 
-           - name: 📊 Generate Executive Security Report
-              run: |
-          echo "📊 Generating executive security report..."
-
-          # Load analysis data or create defaults
-          if [ ! -f security-analysis-data.json ]; then
-            echo '{"totals":{"critical":0,"high":0,"findings":0},"risk_assessment":{"level":"low","compliance_score":100}}' > security-analysis-data.json
-          fi
-
-          critical_count=$(jq -r '.totals.critical // 0' security-analysis-data.json)
-          high_count=$(jq -r '.totals.high // 0' security-analysis-data.json)
-          total_count=$(jq -r '.totals.findings // 0' security-analysis-data.json)
-          risk_level=$(jq -r '.risk_assessment.level // "low"' security-analysis-data.json)
-          compliance_score=$(jq -r '.risk_assessment.compliance_score // 100' security-analysis-data.json)
-
-          # Emoji assignment
-          case "$risk_level" in
-            "critical") risk_emoji="🚨";;
-            "high") risk_emoji="⚠️";;
-            "medium") risk_emoji="🟡";;
-            "low") risk_emoji="✅";;
-            *) risk_emoji="🔍";;
-          esac
-
-          # Status badges
-          [ "$critical_count" -eq 0 ] && critical_status="✅" || critical_status="❌"
-          [ "$high_count" -le 5 ] && high_status="✅" || high_status="⚠️"
-          if [ "$compliance_score" -ge 90 ]; then
-            compliance_status="✅"
-          elif [ "$compliance_score" -ge 70 ]; then
-            compliance_status="⚠️"
-          else
-            compliance_status="❌"
-          fi
-
-          # Precompute multi-line fields
-          if [ "$critical_count" -gt 0 ]; then
-            immediate_risks="- **🚨 CRITICAL:** $critical_count critical vulnerabilities require immediate attention\n- **Impact:** Production likely affected"
-            action_p0="Address $critical_count critical security issues"
-            timeline_p0="24-48 hours"
-          else
-            immediate_risks="- ✅ No critical vulnerabilities detected"
-            action_p0="Continue regular monitoring"
-            timeline_p0="Ongoing"
-          fi
-
-          if [ "$compliance_score" -lt 90 ]; then
-            strategic_advice="- Improve process maturity and address recurring security gaps"
-          else
-            strategic_advice="- Maintain strong security posture"
-          fi
-
-          # Framework status
-          [ "$critical_count" -eq 0 ] && owasp_status="✅ Compliant" || owasp_status="⚠️ Issues"
-          [ "$high_count" -le 5 ] && cwe_status="✅" || cwe_status="⚠️"
-          [ "$compliance_score" -ge 85 ] && soc2_status="✅" || soc2_status="⚠️"
-          [ "$compliance_score" -ge 80 ] && iso_status="✅" || iso_status="⚠️"
-
-          # Write the report using placeholders
-          mkdir -p reports/executive
-          cat > reports/executive/security-executive-summary.md <<EOF
-# 🔒 Executive Security Summary
-
-**Repository:** \`${{ github.repository }}\`  
-**Branch:** \`${{ github.ref_name }}\`  
-**Date:** $(date -u +'%Y-%m-%d %H:%M UTC')  
-
----
-
-## ${risk_emoji} Risk Overview
-
-| Metric                | Value                 | Status  |
-|-----------------------|-----------------------|---------|
-| Overall Risk Level    | **${risk_level^^}**    | ${risk_emoji} |
-| Critical Issues       | ${critical_count}      | ${critical_status} |
-| High Issues           | ${high_count}          | ${high_status} |
-| Total Findings        | ${total_count}         | 📊      |
-| Compliance Score      | ${compliance_score}%   | ${compliance_status} |
-
----
-
-## 📈 Business Impact
-
-${immediate_risks}
-
----
-
-## 📋 Strategic Recommendations
-
-${strategic_advice}
-
----
-
-## 🎯 Executive Action Items
-
-| Priority | Action                        | Owner         | Timeline     |
-|----------|-------------------------------|---------------|--------------|
-| P0       | ${action_p0}                  | Security Team | ${timeline_p0} |
-| P1       | Resolve high-severity issues  | Dev Team      | 1 week       |
-| P2       | Improve scan coverage         | DevOps        | 1 month      |
-| P3       | Security Awareness Training   | All Teams     | Quarterly    |
-
----
-
-## 📊 Compliance Status
-
-| Framework        | Status | Notes                                 |
-|------------------|--------|----------------------------------------|
-| OWASP Top 10     | ${owasp_status} | Risk-based vulnerability coverage |
-| CWE Top 25       | ${cwe_status}   | Static scan patterns applied       |
-| SOC 2 Type II    | ${soc2_status}  | Control validation active          |
-| ISO 27001        | ${iso_status}   | Policy framework aligned           |
-
----
-
-*Auto-generated by Hybrid Security Pipeline*
-EOF
-
-          echo "✅ Executive security summary generated at reports/executive/security-executive-summary.md"
-
-      - name: 📧 Multi-Channel Report Distribution
-        if: always()
-        run: |
-          echo "📧 Distributing security reports via multiple channels..."
-          
-          critical_count=$(jq '.totals.critical' security-analysis-data.json)
-          high_count=$(jq '.totals.high' security-analysis-data.json)
-          risk_level=$(jq -r '.risk_assessment.level' security-analysis-data.json)
-          compliance_score=$(jq '.risk_assessment.compliance_score' security-analysis-data.json)
-          
-          # Slack notification with detailed context
-          if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
-            echo "Sending Slack notification..."
-            
-            # Determine message urgency and styling
-            if [ "$risk_level" = "critical" ]; then
-              color="danger"
-              emoji="🚨"
-              urgency="CRITICAL"
-            elif [ "$risk_level" = "high" ]; then
-              color="warning"  
-              emoji="⚠️"
-              urgency="HIGH"
-            elif [ "$risk_level" = "medium" ]; then
-              color="warning"
-              emoji="🟡" 
-              urgency="MEDIUM"
-            else
-              color="good"
-              emoji="✅"
-              urgency="LOW"
-            fi
-            
-            # Create comprehensive Slack message
-            curl -X POST -H 'Content-type: application/json' \
-              --data '{
-                "text": "'$emoji' Security Scan Results - '$urgency' Priority",
-                "attachments": [
-                  {
-                    "color": "'$color'",
-                    "blocks": [
-                      {
-                        "type": "header",
-                        "text": {
-                          "type": "plain_text",
-                          "text": "'$emoji' Security Assessment: '${{ github.repository }}'"
-                        }
-                      },
-                      {
-                        "type": "section",
-                        "fields": [
-                          {
-                            "type": "mrkdwn",
-                            "text": "*Risk Level:*\n'${risk_level^^}'"
-                          },
-                          {
-                            "type": "mrkdwn",
-                            "text": "*Compliance Score:*\n'$compliance_score'%"
-                          },
-                          {
-                            "type": "mrkdwn", 
-                            "text": "*Critical Issues:*\n'$critical_count'"
-                          },
-                          {
-                            "type": "mrkdwn",
-                            "text": "*High Issues:*\n'$high_count'"
-                          }
-                        ]
-                      },
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": "*Scan Details:*\n• Repository: `${{ github.repository }}`\n• Branch: `${{ github.ref_name }}`\n• Trigger: ${{ github.event_name }}\n• Timestamp: $(date -u +%Y-%m-%d\ %H:%M\ UTC)"
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "📊 View Security Tab"
-                            },
-                            "url": "${{ github.server_url }}/${{ github.repository }}/security"
-                          },
-                          {
-                            "type": "button", 
-                            "text": {
-                              "type": "plain_text",
-                              "text": "🔧 View Workflow"
-                            },
-                            "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }' \
-              ${{ env.SLACK_WEBHOOK_URL }} || echo "Slack notification failed"
-          fi
-          
-          echo "✅ Multi-channel distribution completed"
-
-      - name: 📤 Upload Comprehensive Security Reports
-        if: always()
+      - name: Upload Security Summary
         uses: actions/upload-artifact@v4
         with:
-          name: comprehensive-security-reports
-          path: reports/
-          retention-days: ${{ env.REPORT_RETENTION_DAYS }}
-
-      - name: 📊 Create High-Level Security Issues (Critical/High)
-        if: >
-          always() && 
-          (steps.analysis.outputs.critical-total > 0 || steps.analysis.outputs.high-total > 5)
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const criticalCount = '${{ steps.analysis.outputs.critical-total }}';
-            const highCount = '${{ steps.analysis.outputs.high-total }}';
-            const riskLevel = '${{ steps.analysis.outputs.risk-level }}';
-            
-            const title = `🚨 Security Alert: ${riskLevel.toUpperCase()} risk detected`;
-            const body = `## Security Scan Results
-            
-            **Risk Level:** ${riskLevel.toUpperCase()}
-            **Critical Issues:** ${criticalCount}
-            **High Issues:** ${highCount}
-            **Scan Date:** ${new Date().toISOString()}
-            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            ### Immediate Actions Required:
-            - [ ] Review critical security findings in Security tab
-            - [ ] Assess production impact
-            - [ ] Create remediation plan
-            - [ ] Update security team
-            
-            ### Resources:
-            - [Security Tab](${{ github.server_url }}/${{ github.repository }}/security)
-            - [Workflow Results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            - Download security reports from workflow artifacts
-            
-            **Auto-generated by Hybrid Security Pipeline**`;
-            
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: title,
-              body: body,
-              labels: ['security', 'critical', 'automated']
-            });
-
-      - name: 📋 Workflow Summary Report
-        if: always()
-        run: |
-          critical_count=$(jq '.totals.critical' security-analysis-data.json)
-          high_count=$(jq '.totals.high' security-analysis-data.json)
-          total_count=$(jq '.totals.findings' security-analysis-data.json)
-          risk_level=$(jq -r '.risk_assessment.level' security-analysis-data.json)
-          compliance_score=$(jq '.risk_assessment.compliance_score' security-analysis-data.json)
-          
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          # 🔒 Security Pipeline Summary
-          
-          ## 📊 Scan Results
-          - **Risk Level:** ${risk_level^^}
-          - **Critical Issues:** $critical_count
-          - **High Issues:** $high_count
-          - **Total Findings:** $total_count
-          - **Compliance Score:** ${compliance_score}%
-          
-          ## 🎯 Security Coverage
-          - ✅ **SAST** - Static Application Security Testing
-          - ✅ **DAST** - Dynamic Application Security Testing  
-          - ✅ **SCA** - Software Composition Analysis
-          - ✅ **Secrets** - Secret Detection & Prevention
-          - ✅ **IaC** - Infrastructure as Code Security
-          
-          ## 📋 Next Steps
-          1. Review detailed findings in [Security Tab](${{ github.server_url }}/${{ github.repository }}/security)
-          2. Download comprehensive reports from workflow artifacts
-          3. $([ $critical_count -gt 0 ] && echo "🚨 **URGENT:** Address critical issues immediately" || echo "✅ Continue routine security monitoring")
-          
-          **Report Generation:** $(date -u '+%Y-%m-%d %H:%M UTC')
-          EOF
+          name: security-summary
+          path: reports/final/security-report.md
+          retention-days: 30
