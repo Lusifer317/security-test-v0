@@ -40,12 +40,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Run Semgrep (Cloud Upload)
-        uses: returntocorp/semgrep-action@v1
+        uses: semgrep/semgrep@v1
         with:
              publishToken: ${{ env.SEMGREP_APP_TOKEN }}
              publishDeployment: true
              sendGitMetadata: true
-             generateSarif: "1"
+             generateSarif: true
 
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v3
@@ -75,7 +75,7 @@ jobs:
 
     - name: Setup Nuclei
       run: |
-        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@2.9.9
         echo "$HOME/go/bin" >> $GITHUB_PATH
 
     - name: Define Target and Validate
