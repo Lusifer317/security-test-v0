@@ -63,48 +63,52 @@ jobs:
           retention-days: 30
 
   dast_nuclei_scan:
-    name: 🌐 Nuclei DAST Scan
-    runs-on: ubuntu-latest
-    needs: semgrep_static_analysis
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Setup Nuclei
-        run: |
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          nuclei -update-templates
-      - name: Define Target and Validate
-        id: target
-        run: |
-          TARGET="${{ env.STAGING_URL }}"
-          if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "target=$TARGET" >> $GITHUB_OUTPUT
-          fi
-      - name: Run Nuclei Scan
-        if: steps.target.outputs.skip != 'true'
-        run: |
-          mkdir -p reports/nuclei
-          nuclei -target "${{ steps.target.outputs.target }}" \
-            -severity critical,high,medium,low,info \
-            -rate-limit 10 \
-            -timeout 30 \
-            -json \
-            -output reports/nuclei/nuclei-findings.json \
-            -sarif-export reports/nuclei/nuclei-findings.sarif \
-            -silent
-      - name: Upload SARIF results
-        if: steps.target.outputs.skip != 'true'
-        uses: github/codeql-action/upload-sarif@v2
-        with:
+   - name: 🌐 Nuclei DAST Scan
+  runs-on: ubuntu-latest
+  needs: semgrep_static_analysis
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Nuclei
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+        echo "$HOME/go/bin" >> $GITHUB_PATH
+
+    - name: Define Target and Validate
+      id: target
+      run: |
+        TARGET="${{ env.STAGING_URL }}"
+        if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+        else
+          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run Nuclei Scan
+      if: steps.target.outputs.skip != 'true'
+      run: |
+        mkdir -p reports/nuclei
+        nuclei -target "${{ steps.target.outputs.target }}" \
+          -severity critical,high,medium,low,info \
+          -rate-limit 10 \
+          -timeout 30 \
+          -json \
+          -output reports/nuclei/nuclei-findings.json \
+          -sarif-export reports/nuclei/nuclei-findings.sarif \
+          -silent
+
+    - name: Upload SARIF results
+      if: steps.target.outputs.skip != 'true'
+      uses: github/codeql-action/upload-sarif@v2
+      with:
           sarif_file: reports/nuclei/nuclei-findings.sarif
           category: nuclei-dast
-      - name: Upload Nuclei artifact
-        if: steps.target.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
-        with:
+    - name: Upload Nuclei artifact
+      if: steps.target.outputs.skip != 'true'
+      uses: actions/upload-artifact@v4
+      with:
           name: nuclei-report
           path: reports/nuclei/
           retention-days: 30
