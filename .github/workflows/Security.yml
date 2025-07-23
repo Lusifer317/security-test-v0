@@ -39,26 +39,32 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Run Semgrep (Cloud Upload)
-        uses: returntocorp/semgrep-action@v1
-        with:
-             publishToken: ${{ env.SEMGREP_APP_TOKEN }}
-             publishDeployment: true
-             sendGitMetadata: true
-             generateSarif: true
 
-      - name: Upload SARIF results
+      - name: Install Semgrep CLI
+        run: pip install semgrep
+
+      - name: Run Semgrep CLI Scan
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          semgrep scan --config=auto \
+            --json --output=semgrep.json \
+            --sarif --output=semgrep.sarif \
+            --metrics=off \
+            --publish-token "$SEMGREP_APP_TOKEN"
+
+      - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
           category: semgrep-static
+
       - name: Archive Semgrep JSON Results
         run: |
           mkdir -p reports/semgrep
-          if [ -f semgrep.json ]; then
-            cp semgrep.json reports/semgrep/
-          fi
-      - name: Upload Semgrep reports artifact
+          cp semgrep.json reports/semgrep/
+
+      - name: Upload Semgrep report artifact
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
@@ -70,48 +76,49 @@ jobs:
     runs-on: ubuntu-latest
     needs: semgrep_static_analysis
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Nuclei
-      run: |
-        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@2.9.9
-        echo "$HOME/go/bin" >> $GITHUB_PATH
+      - name: Setup Nuclei
+        run: |
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@2.9.9
+          echo "$HOME/go/bin" >> $GITHUB_PATH
 
-    - name: Define Target and Validate
-      id: target
-      run: |
-        TARGET="${{ env.STAGING_URL }}"
-        if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
-          echo "skip=true" >> $GITHUB_OUTPUT
-        else
-          echo "skip=false" >> $GITHUB_OUTPUT
-          echo "target=$TARGET" >> $GITHUB_OUTPUT
-        fi
+      - name: Define Target and Validate
+        id: target
+        run: |
+          TARGET="${{ env.STAGING_URL }}"
+          if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "target=$TARGET" >> $GITHUB_OUTPUT
+          fi
 
-    - name: Run Nuclei Scan
-      if: steps.target.outputs.skip != 'true'
-      run: |
-        mkdir -p reports/nuclei
-        nuclei -target "${{ steps.target.outputs.target }}" \
-          -severity critical,high,medium,low,info \
-          -rate-limit 10 \
-          -timeout 30 \
-          -json \
-          -output reports/nuclei/nuclei-findings.json \
-          -sarif-export reports/nuclei/nuclei-findings.sarif \
-          -silent
+      - name: Run Nuclei Scan
+        if: steps.target.outputs.skip != 'true'
+        run: |
+          mkdir -p reports/nuclei
+          nuclei -target "${{ steps.target.outputs.target }}" \
+            -severity critical,high,medium,low,info \
+            -rate-limit 10 \
+            -timeout 30 \
+            -json \
+            -output reports/nuclei/nuclei-findings.json \
+            -sarif-export reports/nuclei/nuclei-findings.sarif \
+            -silent
 
-    - name: Upload SARIF results
-      if: steps.target.outputs.skip != 'true'
-      uses: github/codeql-action/upload-sarif@v3
-      with:
+      - name: Upload SARIF results
+        if: steps.target.outputs.skip != 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
           sarif_file: reports/nuclei/nuclei-findings.sarif
           category: nuclei-dast
-    - name: Upload Nuclei artifact
-      if: steps.target.outputs.skip != 'true'
-      uses: actions/upload-artifact@v4
-      with:
+
+      - name: Upload Nuclei artifact
+        if: steps.target.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
           name: nuclei-report
           path: reports/nuclei/
           retention-days: 30
@@ -125,19 +132,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: reports
+
       - name: Summarize Security Results
         run: |
           echo "📊 Generating security report..."
 
           set -e
 
-          # Default values
           total_critical=0
           total_high=0
           total_medium=0
           total_findings=0
 
-          # Semgrep findings
           if [ -f reports/semgrep/semgrep.json ]; then
             total_critical_semgrep=$(jq '[.results[] | select(.extra.severity == "ERROR" or .extra.severity == "CRITICAL")] | length' reports/semgrep/semgrep.json 2>/dev/null || echo "0")
             total_high_semgrep=$(jq '[.results[] | select(.extra.severity == "WARNING" or .extra.severity == "HIGH")] | length' reports/semgrep/semgrep.json 2>/dev/null || echo "0")
@@ -150,7 +156,6 @@ jobs:
             total_findings_semgrep=0
           fi
 
-          # Nuclei findings
           if [ -f reports/nuclei/nuclei-findings.json ]; then
             total_critical_nuclei=$(jq '[.[] | select(.info.severity == "critical")] | length' reports/nuclei/nuclei-findings.json 2>/dev/null || echo "0")
             total_high_nuclei=$(jq '[.[] | select(.info.severity == "high")] | length' reports/nuclei/nuclei-findings.json 2>/dev/null || echo "0")
@@ -163,13 +168,11 @@ jobs:
             total_findings_nuclei=0
           fi
 
-          # Totals
           total_critical=$((total_critical_semgrep + total_critical_nuclei))
           total_high=$((total_high_semgrep + total_high_nuclei))
           total_medium=$((total_medium_semgrep + total_medium_nuclei))
           total_findings=$((total_findings_semgrep + total_findings_nuclei))
 
-          # Risk assessment
           if [ "$total_critical" -gt 0 ]; then
             risk_level="CRITICAL"
             risk_symbol="🚨"
@@ -184,14 +187,12 @@ jobs:
             risk_symbol="✅"
           fi
 
-          # Compliance scoring
           compliance_deductions=0
           compliance_deductions=$((compliance_deductions + total_critical * 10))
           compliance_deductions=$((compliance_deductions + total_high * 3))
           compliance_score=$((100 - compliance_deductions))
           [ $compliance_score -lt 0 ] && compliance_score=0
 
-          # Create report
           mkdir -p reports/final
           cat > reports/final/security-report.md <<EOF
           # 🔒 Security Pipeline Report
