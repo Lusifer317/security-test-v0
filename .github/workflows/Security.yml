@@ -129,86 +129,81 @@ jobs:
           name: semgrep-report
           path: reports/semgrep/
           retention-days: 30
-
-
-
+ 
    dast_nuclei_scan:
     name: 🌐 Nuclei DAST Scan
     runs-on: ubuntu-latest
     needs: semgrep_static_analysis
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Nuclei
-        run: |
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          echo "$HOME/go/bin" >> $GITHUB_PATH
+    - name: Setup Nuclei
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+        echo "$HOME/go/bin" >> $GITHUB_PATH
+        export PATH="$HOME/go/bin:$PATH"
+        nuclei -version
 
-      - name: Update Nuclei Templates
-        run: nuclei -update-templates -silent
+    - name: Download Default Nuclei Templates
+      run: nuclei -update-templates -silent
 
-      - name: Define Target and Validate
-        id: target
-        run: |
-          TARGET="${{ env.STAGING_URL }}"
-          if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Skipping DAST - invalid or placeholder URL: $TARGET"
+    - name: Define Target and Validate
+      id: target
+      run: |
+        TARGET="${{ env.STAGING_URL }}"
+        if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "⚠️ Skipping DAST - invalid or placeholder URL: $TARGET"
+        else
+          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "✅ DAST target validated: $TARGET"
+        fi
+
+    - name: Run Nuclei Scan
+      if: steps.target.outputs.skip != 'true'
+      run: |
+        mkdir -p reports/nuclei
+        nuclei -target "${{ steps.target.outputs.target }}" \
+          -tags cve,vuln,misconfig,exposure \
+          -severity critical,high,medium,low,info \
+          -rate-limit 10 \
+          -timeout 30 \
+          -retries 2 \
+          -jsonl \
+          -output reports/nuclei/nuclei-findings.jsonl \
+          -sarif-export reports/nuclei/nuclei-findings.sarif \
+          -silent || echo "⚠️ Nuclei scan completed with warnings"
+
+    - name: Validate Nuclei SARIF
+      if: steps.target.outputs.skip != 'true'
+      run: |
+        if [ -f reports/nuclei/nuclei-findings.sarif ] && [ -s reports/nuclei/nuclei-findings.sarif ]; then
+          if jq . reports/nuclei/nuclei-findings.sarif > /dev/null 2>&1; then
+            echo "✅ Nuclei SARIF is valid"
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "target=$TARGET" >> $GITHUB_OUTPUT
-            echo "✅ DAST target validated: $TARGET"
+            echo "❌ Nuclei SARIF is invalid JSON, skipping upload"
+            rm -f reports/nuclei/nuclei-findings.sarif
           fi
+        else
+          echo "⚠️ No Nuclei SARIF file generated or file is empty"
+        fi
 
-      - name: Run Nuclei Scan
-        if: steps.target.outputs.skip != 'true'
-        run: |
-         export PATH="$HOME/go/bin:$PATH"
-         nuclei -version  # confirm it's v2.9.9 or newer
+    - name: Upload SARIF to GitHub
+      if: steps.target.outputs.skip != 'true' && success()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: reports/nuclei/nuclei-findings.sarif
+        category: nuclei-dast
 
-         mkdir -p reports/nuclei
-         nuclei -target "${{ steps.target.outputs.target }}" \
-         -tags cve,vuln,misconfig,exposure \
-         -severity critical,high,medium,low,info \
-         -rate-limit 10 \
-         -timeout 30 \
-         -retries 2 \
-         -jsonl \
-         -output reports/nuclei/nuclei-findings.jsonl \
-         -sarif-export reports/nuclei/nuclei-findings.sarif \
-         -silent || echo "⚠️ Nuclei scan completed with warnings"
-
-
-      - name: Validate Nuclei SARIF
-        if: steps.target.outputs.skip != 'true'
-        run: |
-          if [ -f reports/nuclei/nuclei-findings.sarif ] && [ -s reports/nuclei/nuclei-findings.sarif ]; then
-            if jq . reports/nuclei/nuclei-findings.sarif > /dev/null 2>&1; then
-              echo "✅ Nuclei SARIF is valid"
-            else
-              echo "❌ Nuclei SARIF is invalid JSON, skipping upload"
-              rm -f reports/nuclei/nuclei-findings.sarif
-            fi
-          else
-            echo "⚠️ No Nuclei SARIF file generated or file is empty"
-          fi
-
-      - name: Upload SARIF results
-        if: steps.target.outputs.skip != 'true' && hashFiles('reports/nuclei/nuclei-findings.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: reports/nuclei/nuclei-findings.sarif
-          category: nuclei-dast
-
-      - name: Upload Nuclei artifact
-        if: steps.target.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuclei-report
-          path: reports/nuclei/
-          retention-days: 30
-
+    - name: Upload Nuclei Scan Artifacts
+      if: steps.target.outputs.skip != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuclei-report
+        path: reports/nuclei/
+        retention-days: 30
 
    intelligence_reporting:
     name: 📊 Intelligence & Clean Reporting
