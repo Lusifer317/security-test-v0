@@ -11,4 +11,3 @@ plugins:
     opt:
       - module=berty.tech/berty
       - generate_unbound_methods=true
-
