@@ -164,17 +164,21 @@ jobs:
       - name: Run Nuclei Scan
         if: steps.target.outputs.skip != 'true'
         run: |
-          mkdir -p reports/nuclei
-          nuclei -target "${{ steps.target.outputs.target }}" \
-            -tags cve,vuln,misconfig,exposure \
-            -severity critical,high,medium,low,info \
-            -rate-limit 10 \
-            -timeout 30 \
-            -retries 2 \
-            -jsonl \
-            -output reports/nuclei/nuclei-findings.jsonl \
-            -sarif-export reports/nuclei/nuclei-findings.sarif \
-            -silent || echo "⚠️ Nuclei scan completed with warnings"
+         export PATH="$HOME/go/bin:$PATH"
+         nuclei -version  # confirm it's v2.9.9 or newer
+
+         mkdir -p reports/nuclei
+         nuclei -target "${{ steps.target.outputs.target }}" \
+         -tags cve,vuln,misconfig,exposure \
+         -severity critical,high,medium,low,info \
+         -rate-limit 10 \
+         -timeout 30 \
+         -retries 2 \
+         -jsonl \
+         -output reports/nuclei/nuclei-findings.jsonl \
+         -sarif-export reports/nuclei/nuclei-findings.sarif \
+         -silent || echo "⚠️ Nuclei scan completed with warnings"
+
 
       - name: Validate Nuclei SARIF
         if: steps.target.outputs.skip != 'true'
