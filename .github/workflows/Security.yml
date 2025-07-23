@@ -171,8 +171,8 @@ jobs:
             -rate-limit 10 \
             -timeout 30 \
             -retries 2 \
-            -json \
-            -output reports/nuclei/nuclei-findings.json \
+            -jsonl \
+            -output reports/nuclei/nuclei-findings.jsonl \
             -sarif-export reports/nuclei/nuclei-findings.sarif \
             -silent || echo "⚠️ Nuclei scan completed with warnings"
 
@@ -204,6 +204,7 @@ jobs:
           name: nuclei-report
           path: reports/nuclei/
           retention-days: 30
+
 
    intelligence_reporting:
     name: 📊 Intelligence & Clean Reporting
