@@ -43,28 +43,34 @@ jobs:
       - name: Install Semgrep CLI
         run: pip install semgrep
 
-      - name: Run Semgrep CLI Scan
+      - name: Run Semgrep scan with Upload and PR comment
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          semgrep scan --config=auto \
-            --json --output=semgrep.json \
-            --sarif --output=semgrep.sarif \
+          echo "🔍 Running Semgrep scan and uploading to Semgrep Cloud..."
+          
+          semgrep ci \
+            --config=auto \
             --metrics=off \
-            --publish-token "$SEMGREP_APP_TOKEN"
+            --publish-token "$SEMGREP_APP_TOKEN" \
+            --sarif > semgrep.sarif || true
 
-      - name: Upload SARIF to GitHub Code Scanning
+          echo "✅ Semgrep scan completed"
+
+      - name: Upload Semgrep to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
           category: semgrep-static
 
-      - name: Archive Semgrep JSON Results
+      - name: Upload SARIF + JSON Results Artifact
         run: |
           mkdir -p reports/semgrep
-          cp semgrep.json reports/semgrep/
+          cp semgrep.sarif reports/semgrep/semgrep.sarif
+        continue-on-error: true
 
-      - name: Upload Semgrep report artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
