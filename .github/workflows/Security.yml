@@ -360,7 +360,9 @@ jobs:
           - **Optimization:** Consider expanding security coverage or reducing scan frequency"
           fi
 
-          sed -i "s|RECOMMENDED_ACTIONS|$recommendations|g" reports/final/security-report.md
+          escaped_recommendations=$(printf '%s\n' "$recommendations" | sed 's/[&/\]/\\&/g')
+          sed -i "s|RECOMMENDED_ACTIONS|$escaped_recommendations|g" reports/final/security-report.md
+
 
           echo "✅ Security report generated successfully"
 
