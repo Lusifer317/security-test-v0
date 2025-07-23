@@ -33,51 +33,60 @@ env:
   REPORT_RETENTION_DAYS: '180'
 
 jobs:
-  semgrep_static_analysis:
-    name: 📝 Semgrep Static Code Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+ semgrep_static_analysis:
+  name: 📝 Semgrep Static Code Analysis
+  runs-on: ubuntu-latest
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Install Semgrep CLI
-        run: pip install semgrep
+    - name: Install Semgrep CLI
+      run: pip install semgrep
 
-      - name: Run Semgrep scan with Upload and PR comment
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "🔍 Running Semgrep scan and uploading to Semgrep Cloud..."
-          
-          semgrep ci \
-            --config=auto \
-            --metrics=off \
-            --publish-token "$SEMGREP_APP_TOKEN" \
-            --sarif > semgrep.sarif || true
+    - name: Run Semgrep scan and generate SARIF
+      env:
+        SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "🔍 Running Semgrep scan..."
+        semgrep ci \
+          --config=auto \
+          --metrics=off \
+          --publish-token "$SEMGREP_APP_TOKEN" \
+          --sarif=semgrep.sarif || echo "⚠️ Semgrep exited with non-zero status"
 
-          echo "✅ Semgrep scan completed"
+    - name: Validate SARIF before upload
+      run: |
+        if [ ! -s semgrep.sarif ]; then
+          echo "❌ SARIF file does not exist or is empty"
+          exit 1
+        fi
+        if ! jq . semgrep.sarif > /dev/null 2>&1; then
+          echo "❌ SARIF file is not valid JSON"
+          cat semgrep.sarif
+          exit 1
+        fi
+        echo "✅ SARIF is valid"
 
-      - name: Upload Semgrep to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-          category: semgrep-static
+    - name: Upload SARIF to GitHub Code Scanning
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: semgrep.sarif
+        category: semgrep-static
 
-      - name: Upload SARIF + JSON Results Artifact
-        run: |
-          mkdir -p reports/semgrep
-          cp semgrep.sarif reports/semgrep/semgrep.sarif
-        continue-on-error: true
+    - name: Archive SARIF Result
+      run: |
+        mkdir -p reports/semgrep
+        cp semgrep.sarif reports/semgrep/
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-report
-          path: reports/semgrep/
-          retention-days: 30
+    - name: Upload SARIF Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: semgrep-report
+        path: reports/semgrep/
+        retention-days: 30
 
-  dast_nuclei_scan:
+ dast_nuclei_scan:
     name: 🌐 Nuclei DAST Scan
     runs-on: ubuntu-latest
     needs: semgrep_static_analysis
