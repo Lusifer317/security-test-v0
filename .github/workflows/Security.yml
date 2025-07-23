@@ -184,7 +184,6 @@ jobs:
             echo "✅ Nuclei SARIF is valid"
           else
             echo "❌ Nuclei SARIF is invalid JSON, skipping upload"
-            rm -f reports/nuclei/nuclei-findings.sarif
           fi
         else
           echo "⚠️ No Nuclei SARIF file generated or file is empty"
