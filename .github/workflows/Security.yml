@@ -33,7 +33,8 @@ env:
   REPORT_RETENTION_DAYS: '180'
 
 jobs:
-   semgrep_static_analysis:
+
+  semgrep_static_analysis:
     name: 📝 Semgrep Static Code Analysis
     runs-on: ubuntu-latest
     steps:
@@ -49,67 +50,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔍 Running Semgrep scan..."
-          
-          # Generate SARIF for GitHub Security tab
-          semgrep --config=auto --sarif --quiet > semgrep.sarif || echo "⚠️ Semgrep SARIF failed"
-          
-          # Generate JSON for intelligence reporting
-          semgrep --config=auto --json --quiet > semgrep.json || echo "⚠️ Semgrep JSON failed"
-          
-          # Upload to Semgrep Cloud (if token available)
+          semgrep --config=auto --sarif --quiet > semgrep.sarif || echo "⚠️ SARIF failed"
+          semgrep --config=auto --json --quiet > semgrep.json || echo "⚠️ JSON failed"
+
           if [ -n "$SEMGREP_APP_TOKEN" ]; then
             echo "📤 Uploading to Semgrep Cloud..."
             semgrep ci --config=auto || echo "⚠️ Cloud upload failed"
-          else
-            echo "⚠️ No token - skipping cloud upload"
           fi
 
       - name: Ensure valid outputs
         run: |
-          # Create valid empty SARIF if missing
-          if [ ! -s semgrep.sarif ]; then
-            echo "⚠️ Creating empty SARIF..."
-            cat > semgrep.sarif << 'EOF'
-          {
-            "version": "2.1.0",
-            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-            "runs": [{
-              "tool": {"driver": {"name": "semgrep"}},
-              "results": []
-            }]
-          }
-          EOF
-          fi
-          
-          # Create valid empty JSON if missing
-          if [ ! -s semgrep.json ]; then
-            echo "⚠️ Creating empty JSON..."
-            echo '{"results":[],"errors":[],"paths":{"scanned":[]}}' > semgrep.json
-          fi
-          
-          # Validate files
-          if jq . semgrep.sarif > /dev/null 2>&1; then
-            echo "✅ SARIF is valid"
-          else
-            echo "❌ SARIF invalid, recreating..."
-            cat > semgrep.sarif << 'EOF'
-          {
-            "version": "2.1.0",
-            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-            "runs": [{
-              "tool": {"driver": {"name": "semgrep"}},
-              "results": []
-            }]
-          }
-          EOF
-          fi
-
-      - name: Show scan results
-        run: |
-          if [ -f semgrep.json ]; then
-            count=$(jq '.results | length' semgrep.json 2>/dev/null || echo "0")
-            echo "🔍 Semgrep found $count security findings"
-          fi
+          [ ! -s semgrep.sarif ] && echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"semgrep"}},"results":[]}]}'> semgrep.sarif
+          [ ! -s semgrep.json ] && echo '{"results":[],"errors":[],"paths":{"scanned":[]}}' > semgrep.json
 
       - name: Upload SARIF to GitHub Security Tab
         uses: github/codeql-action/upload-sarif@v3
@@ -117,11 +69,10 @@ jobs:
           sarif_file: semgrep.sarif
           category: semgrep-static
 
-      - name: Archive results for intelligence reporting
+      - name: Archive results
         run: |
           mkdir -p reports/semgrep
-          cp semgrep.sarif reports/semgrep/
-          cp semgrep.json reports/semgrep/
+          cp semgrep.* reports/semgrep/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -129,82 +80,77 @@ jobs:
           name: semgrep-report
           path: reports/semgrep/
           retention-days: 30
- 
-   dast_nuclei_scan:
+
+  dast_nuclei_scan:
     name: 🌐 Nuclei DAST Scan
     runs-on: ubuntu-latest
     needs: semgrep_static_analysis
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Nuclei
-      run: |
-        go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-        echo "$HOME/go/bin" >> $GITHUB_PATH
-        export PATH="$HOME/go/bin:$PATH"
-        nuclei -version
+      - name: Setup Nuclei
+        run: |
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+          export PATH="$HOME/go/bin:$PATH"
+          nuclei -version
 
-    - name: Download Default Nuclei Templates
-      run: nuclei -update-templates -silent
+      - name: Download Nuclei Templates
+        run: nuclei -update-templates -silent
 
-    - name: Define Target and Validate
-      id: target
-      run: |
-        TARGET="${{ env.STAGING_URL }}"
-        if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
-          echo "skip=true" >> $GITHUB_OUTPUT
-          echo "⚠️ Skipping DAST - invalid or placeholder URL: $TARGET"
-        else
-          echo "skip=false" >> $GITHUB_OUTPUT
-          echo "target=$TARGET" >> $GITHUB_OUTPUT
-          echo "✅ DAST target validated: $TARGET"
-        fi
-
-    - name: Run Nuclei Scan
-      if: steps.target.outputs.skip != 'true'
-      run: |
-        mkdir -p reports/nuclei
-        nuclei -target "${{ steps.target.outputs.target }}" \
-          -tags cve,vuln,misconfig,exposure \
-          -severity critical,high,medium,low,info \
-          -rate-limit 10 \
-          -timeout 30 \
-          -retries 2 \
-          -jsonl \
-          -output reports/nuclei/nuclei-findings.jsonl \
-          -sarif-export reports/nuclei/nuclei-findings.sarif \
-          -silent || echo "⚠️ Nuclei scan completed with warnings"
-
-    - name: Validate Nuclei SARIF
-      if: steps.target.outputs.skip != 'true'
-      run: |
-        if [ -f reports/nuclei/nuclei-findings.sarif ] && [ -s reports/nuclei/nuclei-findings.sarif ]; then
-          if jq . reports/nuclei/nuclei-findings.sarif > /dev/null 2>&1; then
-            echo "✅ Nuclei SARIF is valid"
+      - name: Define Target and Validate
+        id: target
+        run: |
+          TARGET="${{ env.STAGING_URL }}"
+          if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Skipping DAST - invalid or placeholder URL: $TARGET"
           else
-            echo "❌ Nuclei SARIF is invalid JSON, skipping upload"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "target=$TARGET" >> $GITHUB_OUTPUT
+            echo "✅ Valid DAST target: $TARGET"
           fi
-        else
-          echo "⚠️ No Nuclei SARIF file generated or file is empty"
-        fi
 
-    - name: Upload SARIF to GitHub
-      if: steps.target.outputs.skip != 'true' && success()
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: reports/nuclei/nuclei-findings.sarif
-        category: nuclei-dast
+      - name: Run Nuclei Scan
+        if: steps.target.outputs.skip != 'true'
+        run: |
+          mkdir -p reports/nuclei
+          nuclei -target "${{ steps.target.outputs.target }}" \
+            -templates ~/.config/nuclei/templates \
+            -tags cve,vuln,misconfig,exposure \
+            -severity critical,high,medium,low,info \
+            -rate-limit 10 \
+            -timeout 30 \
+            -retries 2 \
+            -jsonl -output reports/nuclei/nuclei-findings.json \
+            -sarif-export reports/nuclei/nuclei-findings.sarif \
+            -silent || echo "⚠️ Nuclei scan finished with warnings"
 
-    - name: Upload Nuclei Scan Artifacts
-      if: steps.target.outputs.skip != 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: nuclei-report
-        path: reports/nuclei/
-        retention-days: 30
+      - name: Validate and Fix SARIF if Needed
+        if: steps.target.outputs.skip != 'true'
+        run: |
+          if [ ! -s reports/nuclei/nuclei-findings.sarif ]; then
+            echo "⚠️ Creating fallback SARIF"
+            mkdir -p reports/nuclei
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"nuclei"}},"results":[]}]}'> reports/nuclei/nuclei-findings.sarif
+          fi
 
-   intelligence_reporting:
+      - name: Upload SARIF to GitHub Security Tab
+        if: steps.target.outputs.skip != 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/nuclei/nuclei-findings.sarif
+          category: nuclei-dast
+
+      - name: Upload Nuclei Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-report
+          path: reports/nuclei/
+          retention-days: 30
+
+  intelligence_reporting:
     name: 📊 Intelligence & Clean Reporting
     runs-on: ubuntu-latest
     needs: [semgrep_static_analysis, dast_nuclei_scan]
@@ -218,152 +164,76 @@ jobs:
 
       - name: Summarize Security Results
         run: |
-          echo "📊 Generating security report..."
+          echo "📊 Generating summary..."
 
-          total_critical=0
-          total_high=0
-          total_medium=0
-          total_findings=0
+          total_critical=0; total_high=0; total_medium=0; total_findings=0
 
-          # Process Semgrep results
           if [ -f reports/semgrep-report/semgrep.json ]; then
-            echo "📝 Processing Semgrep JSON results..."
-            total_critical_semgrep=$(jq '[.results[] | select(.extra.severity == "ERROR" or .extra.severity == "CRITICAL")] | length' reports/semgrep-report/semgrep.json 2>/dev/null || echo "0")
-            total_high_semgrep=$(jq '[.results[] | select(.extra.severity == "WARNING" or .extra.severity == "HIGH")] | length' reports/semgrep-report/semgrep.json 2>/dev/null || echo "0")
-            total_medium_semgrep=$(jq '[.results[] | select(.extra.severity == "MEDIUM")] | length' reports/semgrep-report/semgrep.json 2>/dev/null || echo "0")
-            total_findings_semgrep=$(jq '.results | length' reports/semgrep-report/semgrep.json 2>/dev/null || echo "0")
+            total_critical_semgrep=$(jq '[.results[] | select(.extra.severity=="ERROR" or .extra.severity=="CRITICAL")] | length' reports/semgrep-report/semgrep.json)
+            total_high_semgrep=$(jq '[.results[] | select(.extra.severity=="WARNING" or .extra.severity=="HIGH")] | length' reports/semgrep-report/semgrep.json)
+            total_medium_semgrep=$(jq '[.results[] | select(.extra.severity=="MEDIUM")] | length' reports/semgrep-report/semgrep.json)
+            total_findings_semgrep=$(jq '.results | length' reports/semgrep-report/semgrep.json)
           else
-            echo "⚠️ No Semgrep JSON results found, using SARIF if available..."
-            if [ -f reports/semgrep-report/semgrep.sarif ]; then
-              total_critical_semgrep=$(jq '[.runs[].results[] | select(.level == "error")] | length' reports/semgrep-report/semgrep.sarif 2>/dev/null || echo "0")
-              total_high_semgrep=$(jq '[.runs[].results[] | select(.level == "warning")] | length' reports/semgrep-report/semgrep.sarif 2>/dev/null || echo "0")
-              total_medium_semgrep=$(jq '[.runs[].results[] | select(.level == "note")] | length' reports/semgrep-report/semgrep.sarif 2>/dev/null || echo "0")
-              total_findings_semgrep=$(jq '[.runs[].results[]] | length' reports/semgrep-report/semgrep.sarif 2>/dev/null || echo "0")
-            else
-              total_critical_semgrep=0
-              total_high_semgrep=0
-              total_medium_semgrep=0
-              total_findings_semgrep=0
-            fi
+            total_critical_semgrep=0; total_high_semgrep=0; total_medium_semgrep=0; total_findings_semgrep=0
           fi
 
-          # Process Nuclei results
           if [ -f reports/nuclei-report/nuclei-findings.json ]; then
-            echo "🌐 Processing Nuclei results..."
-            total_critical_nuclei=$(jq '[.[] | select(.info.severity == "critical")] | length' reports/nuclei-report/nuclei-findings.json 2>/dev/null || echo "0")
-            total_high_nuclei=$(jq '[.[] | select(.info.severity == "high")] | length' reports/nuclei-report/nuclei-findings.json 2>/dev/null || echo "0")
-            total_medium_nuclei=$(jq '[.[] | select(.info.severity == "medium")] | length' reports/nuclei-report/nuclei-findings.json 2>/dev/null || echo "0")
-            total_findings_nuclei=$(jq 'length' reports/nuclei-report/nuclei-findings.json 2>/dev/null || echo "0")
+            total_critical_nuclei=$(jq '[.[] | select(.info.severity=="critical")] | length' reports/nuclei-report/nuclei-findings.json)
+            total_high_nuclei=$(jq '[.[] | select(.info.severity=="high")] | length' reports/nuclei-report/nuclei-findings.json)
+            total_medium_nuclei=$(jq '[.[] | select(.info.severity=="medium")] | length' reports/nuclei-report/nuclei-findings.json)
+            total_findings_nuclei=$(jq 'length' reports/nuclei-report/nuclei-findings.json)
           else
-            echo "⚠️ No Nuclei results found (DAST may have been skipped)"
-            total_critical_nuclei=0
-            total_high_nuclei=0
-            total_medium_nuclei=0
-            total_findings_nuclei=0
+            total_critical_nuclei=0; total_high_nuclei=0; total_medium_nuclei=0; total_findings_nuclei=0
           fi
 
-          # Calculate totals
           total_critical=$((total_critical_semgrep + total_critical_nuclei))
           total_high=$((total_high_semgrep + total_high_nuclei))
           total_medium=$((total_medium_semgrep + total_medium_nuclei))
           total_findings=$((total_findings_semgrep + total_findings_nuclei))
 
-          # Risk assessment
           if [ "$total_critical" -gt 0 ]; then
-            risk_level="CRITICAL"
-            risk_symbol="🚨"
+            risk_level="CRITICAL"; risk_symbol="🚨"
           elif [ "$total_high" -gt 5 ]; then
-            risk_level="HIGH"
-            risk_symbol="⚠️"
+            risk_level="HIGH"; risk_symbol="⚠️"
           elif [ "$total_high" -gt 0 ]; then
-            risk_level="MEDIUM"
-            risk_symbol="🟡"
+            risk_level="MEDIUM"; risk_symbol="🟡"
           else
-            risk_level="LOW"
-            risk_symbol="✅"
+            risk_level="LOW"; risk_symbol="✅"
           fi
 
-          # Compliance scoring
-          compliance_deductions=0
-          compliance_deductions=$((compliance_deductions + total_critical * 10))
-          compliance_deductions=$((compliance_deductions + total_high * 3))
-          compliance_score=$((100 - compliance_deductions))
+          compliance_score=$((100 - total_critical * 10 - total_high * 3))
           [ $compliance_score -lt 0 ] && compliance_score=0
 
-          echo "📊 Security Analysis Summary:"
-          echo "   Semgrep: $total_findings_semgrep findings ($total_critical_semgrep critical, $total_high_semgrep high)"
-          echo "   Nuclei: $total_findings_nuclei findings ($total_critical_nuclei critical, $total_high_nuclei high)"
-          echo "   Total: $total_findings findings ($total_critical critical, $total_high high)"
-          echo "   Risk Level: $risk_level"
-          echo "   Compliance Score: $compliance_score%"
-
-          # Generate report
           mkdir -p reports/final
-          cat > reports/final/security-report.md << 'REPORT_EOF'
-          # 🔒 Security Pipeline Report
+          cat > reports/final/security-report.md << REPORT_EOF
+# 🔒 Security Pipeline Report
 
-          ## RISK_SYMBOL Risk Level: RISK_LEVEL
-          - **Critical Issues:** TOTAL_CRITICAL
-          - **High Issues:** TOTAL_HIGH
-          - **Medium Issues:** TOTAL_MEDIUM  
-          - **Total Findings:** TOTAL_FINDINGS
-          - **Compliance Score:** COMPLIANCE_SCORE%
+## $risk_symbol Risk Level: $risk_level
+- **Critical Issues:** $total_critical
+- **High Issues:** $total_high
+- **Medium Issues:** $total_medium
+- **Total Findings:** $total_findings
+- **Compliance Score:** ${compliance_score}%
 
-          ## 📊 Breakdown by Tool
-          - **Semgrep (SAST):** SEMGREP_FINDINGS findings (SEMGREP_CRITICAL critical, SEMGREP_HIGH high)
-          - **Nuclei (DAST):** NUCLEI_FINDINGS findings (NUCLEI_CRITICAL critical, NUCLEI_HIGH high)
+## 📊 Breakdown by Tool
+- **Semgrep (SAST):** $total_findings_semgrep findings ($total_critical_semgrep critical, $total_high_semgrep high)
+- **Nuclei (DAST):** $total_findings_nuclei findings ($total_critical_nuclei critical, $total_high_nuclei high)
 
-          ## 🎯 Recommended Actions
-          RECOMMENDED_ACTIONS
+## 🎯 Recommended Actions
+$(if [ "$total_critical" -gt 0 ]; then
+  echo "- 🚨 Address critical issues immediately and audit SDLC process.";
+elif [ "$total_high" -gt 5 ]; then
+  echo "- ⚠️ Review high findings within 7 days and improve testing coverage.";
+elif [ "$total_high" -gt 0 ]; then
+  echo "- 📋 Address high findings in upcoming sprint.";
+else
+  echo "- ✅ Maintain good security hygiene.";
+fi)
 
-          ## 📋 Summary
-          - Full Semgrep static analysis and Nuclei dynamic scan executed
-          - SARIF results uploaded to GitHub Security tab for detailed review
-          - All scan artifacts preserved for compliance and further analysis
-          - Executive summary available for stakeholder communication
+**Report generated:** $(date -u)
+REPORT_EOF
 
-          **Report generated on:** REPORT_DATE
-          REPORT_EOF
-
-          # Replace placeholders
-          sed -i "s/RISK_SYMBOL/$risk_symbol/g" reports/final/security-report.md
-          sed -i "s/RISK_LEVEL/$risk_level/g" reports/final/security-report.md
-          sed -i "s/TOTAL_CRITICAL/$total_critical/g" reports/final/security-report.md
-          sed -i "s/TOTAL_HIGH/$total_high/g" reports/final/security-report.md
-          sed -i "s/TOTAL_MEDIUM/$total_medium/g" reports/final/security-report.md
-          sed -i "s/TOTAL_FINDINGS/$total_findings/g" reports/final/security-report.md
-          sed -i "s/COMPLIANCE_SCORE/$compliance_score/g" reports/final/security-report.md
-          sed -i "s/SEMGREP_FINDINGS/$total_findings_semgrep/g" reports/final/security-report.md
-          sed -i "s/SEMGREP_CRITICAL/$total_critical_semgrep/g" reports/final/security-report.md
-          sed -i "s/SEMGREP_HIGH/$total_high_semgrep/g" reports/final/security-report.md
-          sed -i "s/NUCLEI_FINDINGS/$total_findings_nuclei/g" reports/final/security-report.md
-          sed -i "s/NUCLEI_CRITICAL/$total_critical_nuclei/g" reports/final/security-report.md
-          sed -i "s/NUCLEI_HIGH/$total_high_nuclei/g" reports/final/security-report.md
-          sed -i "s/REPORT_DATE/$(date -u '+%Y-%m-%d %H:%M UTC')/g" reports/final/security-report.md
-
-          # Generate recommendations
-          if [ "$total_critical" -gt 0 ]; then
-            recommendations="- **🚨 URGENT:** Address all $total_critical critical issues immediately
-          - **Review Process:** Investigate how critical vulnerabilities reached this stage
-          - **Impact Assessment:** Determine if production systems are affected"
-          elif [ "$total_high" -gt 5 ]; then
-            recommendations="- **⚠️ HIGH PRIORITY:** Address $total_high high-severity issues within 1 week
-          - **Resource Allocation:** Assign dedicated security review resources
-          - **Process Improvement:** Consider additional security controls"
-          elif [ "$total_high" -gt 0 ]; then
-            recommendations="- **📋 SCHEDULED:** Review and address $total_high high-severity issues within 2 weeks
-          - **Monitoring:** Continue regular security scanning and monitoring"
-          else
-            recommendations="- **✅ MAINTENANCE:** No critical or high-severity issues detected
-          - **Continue:** Maintain current security practices and regular scanning
-          - **Optimization:** Consider expanding security coverage or reducing scan frequency"
-          fi
-
-          escaped_recommendations=$(printf '%s\n' "$recommendations" | sed 's/[&/\]/\\&/g')
-          sed -i "s|RECOMMENDED_ACTIONS|$escaped_recommendations|g" reports/final/security-report.md
-
-
-          echo "✅ Security report generated successfully"
+          echo "✅ Security summary compiled"
 
       - name: Create Step Summary
         run: |
@@ -371,7 +241,7 @@ jobs:
             echo "## 🔒 Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
             cat reports/final/security-report.md >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ Security report not generated" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ No security summary generated" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload Security Summary
