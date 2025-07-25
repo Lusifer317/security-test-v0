@@ -43,6 +43,14 @@ jobs:
 
       - name: Install Semgrep CLI
         run: pip install semgrep
+        
+      - name: Cache Semgrep dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/semgrep
+          key: ${{ runner.os }}-semgrep-${{ hashFiles('**/*.py', '**/*.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-semgrep-
 
       - name: Run Semgrep scan with modern CLI syntax
         env:
@@ -102,6 +110,13 @@ jobs:
           echo "$HOME/go/bin" >> $GITHUB_PATH
           export PATH="$HOME/go/bin:$PATH"
           nuclei -version
+          
+      - name: Cache Nuclei templates
+        uses: actions/cache@v3
+        with:
+          path: ~/.config/nuclei/templates
+          key: ${{ runner.os }}-nuclei-templates
+
 
       - name: Download Nuclei Templates
         run: nuclei -update-templates -silent
@@ -280,3 +295,10 @@ jobs:
           name: security-summary
           path: reports/final/
           retention-days: 30
+          
+      - name: Post PR Comment with Security Summary
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: reports/final/security-report.md
+          header: security-report
