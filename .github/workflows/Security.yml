@@ -163,11 +163,19 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.config/nuclei/templates
-          key: ${{ runner.os }}-nuclei-templates
+          key: ${{ runner.os }}-nuclei-templates-${{ hashFiles('~/.config/nuclei/templates/**') }}
+          restore-keys: |
+            ${{ runner.os }}-nuclei-templates-
 
-
-      - name: Download Nuclei Templates
-        run: nuclei -update-templates -silent
+      - name: Download and Update Nuclei Templates
+        run: |
+          nuclei -update-templates -silent
+          echo "📦 Template update completed"
+          
+      - name: List Available Template Categories
+        run: |
+          echo "🔍 Available template categories:"
+          nuclei -templates-list 2>/dev/null | head -20 || echo "Template listing not available"
 
       - name: Define Target and Validate
         id: target
@@ -182,20 +190,164 @@ jobs:
             echo "✅ Valid DAST target: $TARGET"
           fi
 
-      - name: Run Nuclei Scan
+      - name: Run Comprehensive Nuclei Security Scan
         if: steps.target.outputs.skip != 'true'
         run: |
           mkdir -p reports/nuclei
+          
+          echo "🔍 Starting comprehensive security scan with targeted templates..."
+          
           nuclei -target "${{ steps.target.outputs.target }}" \
-          -tags cve,vuln,misconfig,exposure \
-          -severity critical,high,medium,low,info \
-          -rate-limit 10 \
-          -timeout 30 \
-          -retries 2 \
-          -jsonl -output reports/nuclei/nuclei-findings.json \
-          -sarif-export reports/nuclei/nuclei-findings.sarif \
-          -silent || echo "⚠️ Nuclei scan finished with warnings"
+            -t cves/ \
+            -t vulnerabilities/ \
+            -t exposures/ \
+            -t misconfigurations/ \
+            -t default-logins/ \
+            -t file/ \
+            -t network/ \
+            -t dns/ \
+            -t http/ \
+            -t ssl/ \
+            -t headless/ \
+            -t technologies/ \
+            -t workflows/ \
+            -t cves/2023/ \
+            -t cves/2022/ \
+            -t cves/2021/ \
+            -t vulnerabilities/wordpress/ \
+            -t vulnerabilities/apache/ \
+            -t vulnerabilities/nginx/ \
+            -t vulnerabilities/php/ \
+            -t vulnerabilities/java/ \
+            -t vulnerabilities/dotnet/ \
+            -t vulnerabilities/nodejs/ \
+            -t vulnerabilities/python/ \
+            -t exposures/configs/ \
+            -t exposures/backups/ \
+            -t exposures/logs/ \
+            -t exposures/apis/ \
+            -t misconfigurations/apache/ \
+            -t misconfigurations/nginx/ \
+            -t misconfigurations/aws/ \
+            -t misconfigurations/azure/ \
+            -t misconfigurations/gcp/ \
+            -t misconfigurations/kubernetes/ \
+            -t misconfigurations/docker/ \
+            -t default-logins/apache/ \
+            -t default-logins/ftp/ \
+            -t default-logins/ssh/ \
+            -t default-logins/databases/ \
+            -t http/cves/ \
+            -t http/vulnerabilities/ \
+            -t http/exposures/ \
+            -t http/misconfigulation/ \
+            -t http/takeovers/ \
+            -t http/technologies/ \
+            -t file/logs/ \
+            -t file/configs/ \
+            -t network/cves/ \
+            -t network/vulnerabilities/ \
+            -t ssl/weak-cipher/ \
+            -t ssl/tls-version/ \
+            -t ssl/ssl-dns-names/ \
+            -severity critical,high,medium,low,info \
+            -rate-limit 10 \
+            -timeout 30 \
+            -retries 2 \
+            -max-host-error 5 \
+            -jsonl -output reports/nuclei/nuclei-findings.json \
+            -sarif-export reports/nuclei/nuclei-findings.sarif \
+            -stats \
+            -silent || echo "⚠️ Nuclei scan finished with warnings"
 
+      - name: Run OWASP Top 10 Focused Scan
+        if: steps.target.outputs.skip != 'true'
+        run: |
+          echo "🔍 Running OWASP Top 10 focused scan..."
+          
+          nuclei -target "${{ steps.target.outputs.target }}" \
+            -t http/vulnerabilities/wordpress/ \
+            -t http/vulnerabilities/drupal/ \
+            -t http/vulnerabilities/joomla/ \
+            -t http/cves/2023/ \
+            -t http/cves/2022/ \
+            -t http/exposures/ \
+            -t http/misconfiguration/ \
+            -t vulnerabilities/sqli/ \
+            -t vulnerabilities/xss/ \
+            -t vulnerabilities/xxe/ \
+            -t vulnerabilities/ssrf/ \
+            -t vulnerabilities/lfi/ \
+            -t vulnerabilities/rfi/ \
+            -t vulnerabilities/rce/ \
+            -t vulnerabilities/auth-bypass/ \
+            -t vulnerabilities/injection/ \
+            -t default-logins/ \
+            -severity critical,high \
+            -rate-limit 15 \
+            -timeout 45 \
+            -retries 3 \
+            -jsonl -output reports/nuclei/nuclei-owasp-findings.json \
+            -silent || echo "⚠️ OWASP scan completed with warnings"
+
+      - name: Run Technology-Specific Detection
+        if: steps.target.outputs.skip != 'true'
+        run: |
+          echo "🔍 Running technology detection and specific vulnerability checks..."
+          
+          nuclei -target "${{ steps.target.outputs.target }}" \
+            -t technologies/ \
+            -t http/technologies/ \
+            -t technologies/wordpress-detect.yaml \
+            -t technologies/php-detect.yaml \
+            -t technologies/apache-detect.yaml \
+            -t technologies/nginx-detect.yaml \
+            -t technologies/mysql-detect.yaml \
+            -t technologies/java-detect.yaml \
+            -t technologies/python-detect.yaml \
+            -t technologies/nodejs-detect.yaml \
+            -t http/miscellaneous/ \
+            -t http/fuzzing/ \
+            -severity info,low,medium,high,critical \
+            -rate-limit 20 \
+            -timeout 30 \
+            -jsonl -output reports/nuclei/nuclei-tech-findings.json \
+            -silent || echo "⚠️ Technology scan completed with warnings"
+
+      - name: Combine and Process Results
+        if: steps.target.outputs.skip != 'true'
+        run: |
+          echo "📊 Processing and combining scan results..."
+          
+          # Combine all JSONL results
+          if [ -f reports/nuclei/nuclei-findings.json ]; then
+            cp reports/nuclei/nuclei-findings.json reports/nuclei/nuclei-combined.json
+          fi
+          
+          if [ -f reports/nuclei/nuclei-owasp-findings.json ]; then
+            cat reports/nuclei/nuclei-owasp-findings.json >> reports/nuclei/nuclei-combined.json
+          fi
+          
+          if [ -f reports/nuclei/nuclei-tech-findings.json ]; then
+            cat reports/nuclei/nuclei-tech-findings.json >> reports/nuclei/nuclei-combined.json
+          fi
+          
+          # Create final findings file (remove duplicates if any)
+          if [ -f reports/nuclei/nuclei-combined.json ]; then
+            sort -u reports/nuclei/nuclei-combined.json > reports/nuclei/nuclei-findings.json
+          fi
+          
+          # Generate summary statistics
+          if [ -f reports/nuclei/nuclei-findings.json ]; then
+            total_findings=$(wc -l < reports/nuclei/nuclei-findings.json)
+            critical_findings=$(grep -c '"severity":"critical"' reports/nuclei/nuclei-findings.json || echo 0)
+            high_findings=$(grep -c '"severity":"high"' reports/nuclei/nuclei-findings.json || echo 0)
+            
+            echo "🎯 Nuclei Scan Summary:"
+            echo "   Total Findings: $total_findings"
+            echo "   Critical: $critical_findings"
+            echo "   High: $high_findings"
+          fi
 
       - name: Validate and Fix SARIF if Needed
         if: steps.target.outputs.skip != 'true'
@@ -219,6 +371,7 @@ jobs:
           name: nuclei-report
           path: reports/nuclei/
           retention-days: 30
+
           
  intelligence_reporting:
   name: 📊 Intelligence & Clean Reporting
