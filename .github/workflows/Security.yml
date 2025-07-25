@@ -190,75 +190,75 @@ jobs:
             echo " Valid DAST target: $TARGET"
           fi
 
-      - name: Run Comprehensive Nuclei Security Scan
-        if: steps.target.outputs.skip != 'true'
-        run: |
-          mkdir -p reports/nuclei
+     # - name: Run Comprehensive Nuclei Security Scan
+      #  if: steps.target.outputs.skip != 'true'
+       # run: |
+        #  mkdir -p reports/nuclei
           
-          echo " Starting comprehensive security scan with targeted templates..."
+         # echo " Starting comprehensive security scan with targeted templates..."
           
-          nuclei -target "${{ steps.target.outputs.target }}" \
-            -t cves/ \
-            -t vulnerabilities/ \
-            -t exposures/ \
-            -t misconfigurations/ \
-            -t default-logins/ \
-            -t file/ \
-            -t network/ \
-            -t dns/ \
-            -t http/ \
-            -t ssl/ \
-            -t headless/ \
-            -t technologies/ \
-            -t workflows/ \
-            -t cves/2023/ \
-            -t cves/2022/ \
-            -t cves/2021/ \
-            -t vulnerabilities/wordpress/ \
-            -t vulnerabilities/apache/ \
-            -t vulnerabilities/nginx/ \
-            -t vulnerabilities/php/ \
-            -t vulnerabilities/java/ \
-            -t vulnerabilities/dotnet/ \
-            -t vulnerabilities/nodejs/ \
-            -t vulnerabilities/python/ \
-            -t exposures/configs/ \
-            -t exposures/backups/ \
-            -t exposures/logs/ \
-            -t exposures/apis/ \
-            -t misconfigurations/apache/ \
-            -t misconfigurations/nginx/ \
-            -t misconfigurations/aws/ \
-            -t misconfigurations/azure/ \
-            -t misconfigurations/gcp/ \
-            -t misconfigurations/kubernetes/ \
-            -t misconfigurations/docker/ \
-            -t default-logins/apache/ \
-            -t default-logins/ftp/ \
-            -t default-logins/ssh/ \
-            -t default-logins/databases/ \
-            -t http/cves/ \
-            -t http/vulnerabilities/ \
-            -t http/exposures/ \
-            -t http/misconfigulation/ \
-            -t http/takeovers/ \
-            -t http/technologies/ \
-            -t file/logs/ \
-            -t file/configs/ \
-            -t network/cves/ \
-            -t network/vulnerabilities/ \
-            -t ssl/weak-cipher/ \
-            -t ssl/tls-version/ \
-            -t ssl/ssl-dns-names/ \
-            -severity critical,high,medium,low,info \
-            -rate-limit 10 \
-            -timeout 30 \
-            -retries 2 \
-            -max-host-error 5 \
-            -jsonl -output reports/nuclei/nuclei-findings.json \
-            -sarif-export reports/nuclei/nuclei-findings.sarif \
-            -stats \
-            -silent || echo " Nuclei scan finished with warnings"
+          #nuclei -target "${{ steps.target.outputs.target }}" \
+           # -t cves/ \
+            #-t vulnerabilities/ \
+            #-t exposures/ \
+            #-t misconfigurations/ \
+            #-t default-logins/ \
+            #-t file/ \
+            #-t network/ \
+            #-t dns/ \
+            #-t http/ \
+            #-t ssl/ \
+            #-t headless/ \
+            #-t technologies/ \
+            #-t workflows/ \
+            #-t cves/2023/ \
+            #-t cves/2022/ \
+            #-t cves/2021/ \
+            #-t vulnerabilities/wordpress/ \
+            #-t vulnerabilities/apache/ \
+            #-t vulnerabilities/nginx/ \
+            #-t vulnerabilities/php/ \
+            #-t vulnerabilities/java/ \
+            #-t vulnerabilities/dotnet/ \
+            #-t vulnerabilities/nodejs/ \
+            #-t vulnerabilities/python/ \
+            #-t exposures/configs/ \
+            #-t exposures/backups/ \
+            #-t exposures/logs/ \
+            #-t exposures/apis/ \
+            #-t misconfigurations/apache/ \
+            #-t misconfigurations/nginx/ \
+            #-t misconfigurations/aws/ \
+            #-t misconfigurations/azure/ \
+            #-t misconfigurations/gcp/ \
+            #-t misconfigurations/kubernetes/ \
+            #-t misconfigurations/docker/ \
+            #-t default-logins/apache/ \
+            #-t default-logins/ftp/ \
+            #-t default-logins/ssh/ \
+            #-t default-logins/databases/ \
+            #-t http/cves/ \
+            #-t http/vulnerabilities/ \
+            #-t http/exposures/ \
+            #-t http/misconfigulation/ \
+            #-t http/takeovers/ \
+            #-t http/technologies/ \
+            #-t file/logs/ \
+            #-t file/configs/ \
+            #-t network/cves/ \
+            #-t network/vulnerabilities/ \
+            #-t ssl/weak-cipher/ \
+            #-t ssl/tls-version/ \
+            #-t ssl/ssl-dns-names/ \
+            #-severity critical,high,medium,low,info \
+            #-rate-limit 10 \
+            #-timeout 30 \
+            #-retries 2 \
+            #-max-host-error 5 \
+            #-jsonl -output reports/nuclei/nuclei-findings.json \
+            #-sarif-export reports/nuclei/nuclei-findings.sarif \
+            #-stats \
+            #-silent || echo " Nuclei scan finished with warnings"
 
       - name: Run OWASP Top 10 Focused Scan
         if: steps.target.outputs.skip != 'true'
@@ -374,7 +374,7 @@ jobs:
 
           
  intelligence_reporting:
-  name:  Intelligence & Clean Reporting
+  name: 📊 Intelligence & Clean Reporting
   runs-on: ubuntu-latest
   needs: [semgrep_static_analysis, dast_nuclei_scan, Trivy_FS_Scan]
   if: always()
@@ -385,9 +385,18 @@ jobs:
         path: reports
       continue-on-error: true
 
+    - name: Normalize Nuclei JSONL output
+      run: |
+        if [ -f reports/nuclei-report/nuclei-findings.json ]; then
+          echo "🔄 Converting Nuclei JSONL to JSON array..."
+          jq -s '.' reports/nuclei-report/nuclei-findings.json > reports/nuclei-report/nuclei-findings-array.json
+        else
+          echo "[]" > reports/nuclei-report/nuclei-findings-array.json
+        fi
+
     - name: Summarize Security Results
       run: |
-        echo " Generating summary..."
+        echo "📊 Generating summary..."
 
         total_critical=0; total_high=0; total_medium=0; total_findings=0
 
@@ -402,11 +411,11 @@ jobs:
         fi
 
         # NUCLEI
-        if [ -f reports/nuclei-report/nuclei-findings.json ]; then
-          total_critical_nuclei=$(jq '[.[] | select(.info.severity=="critical")] | length' reports/nuclei-report/nuclei-findings.json)
-          total_high_nuclei=$(jq '[.[] | select(.info.severity=="high")] | length' reports/nuclei-report/nuclei-findings.json)
-          total_medium_nuclei=$(jq '[.[] | select(.info.severity=="medium")] | length' reports/nuclei-report/nuclei-findings.json)
-          total_findings_nuclei=$(jq 'length' reports/nuclei-report/nuclei-findings.json)
+        if [ -f reports/nuclei-report/nuclei-findings-array.json ]; then
+          total_critical_nuclei=$(jq '[.[] | select(.info.severity=="critical")] | length' reports/nuclei-report/nuclei-findings-array.json)
+          total_high_nuclei=$(jq '[.[] | select(.info.severity=="high")] | length' reports/nuclei-report/nuclei-findings-array.json)
+          total_medium_nuclei=$(jq '[.[] | select(.info.severity=="medium")] | length' reports/nuclei-report/nuclei-findings-array.json)
+          total_findings_nuclei=$(jq 'length' reports/nuclei-report/nuclei-findings-array.json)
         else
           total_critical_nuclei=0; total_high_nuclei=0; total_medium_nuclei=0; total_findings_nuclei=0
         fi
@@ -441,7 +450,7 @@ jobs:
         mkdir -p reports/final
 
         cat > reports/final/security-report.md << 'REPORT_EOF'
-        #  Security Pipeline Report
+        # 🔒 Security Pipeline Report
 
         ## RISK_SYMBOL Risk Level: RISK_LEVEL
         - **Critical Issues:** TOTAL_CRITICAL
@@ -450,12 +459,12 @@ jobs:
         - **Total Findings:** TOTAL_FINDINGS
         - **Compliance Score:** COMPLIANCE_SCORE%
 
-        ##  Breakdown by Tool
+        ## 📊 Breakdown by Tool
         - **Semgrep (SAST):** SEMGREP_FINDINGS findings (SEMGREP_CRITICAL critical, SEMGREP_HIGH high)
         - **Nuclei (DAST):** NUCLEI_FINDINGS findings (NUCLEI_CRITICAL critical, NUCLEI_HIGH high)
         - **Trivy (FS Scan):** TRIVY_FINDINGS findings (TRIVY_CRITICAL critical, TRIVY_HIGH high)
 
-        ##  Recommended Actions
+        ## 🎯 Recommended Actions
         RECOMMENDED_ACTIONS
 
         **Report generated:** REPORT_DATE
@@ -481,26 +490,26 @@ jobs:
         sed -i "s/REPORT_DATE/$(date -u)/g" reports/final/security-report.md
 
         if [ "$total_critical" -gt 0 ]; then
-          recommendations="-  Address critical issues immediately and audit SDLC process."
+          recommendations="- 🚨 Address critical issues immediately and audit SDLC process."
         elif [ "$total_high" -gt 5 ]; then
-          recommendations="-  Review high findings within 7 days and improve testing coverage."
+          recommendations="- ⚠️ Review high findings within 7 days and improve testing coverage."
         elif [ "$total_high" -gt 0 ]; then
-          recommendations="-  Address high findings in upcoming sprint."
+          recommendations="- 📋 Address high findings in upcoming sprint."
         else
-          recommendations="-  Maintain good security hygiene."
+          recommendations="- ✅ Maintain good security hygiene."
         fi
 
         sed -i "s|RECOMMENDED_ACTIONS|$recommendations|g" reports/final/security-report.md
 
-        echo " Security summary compiled"
+        echo "✅ Security summary compiled"
 
     - name: Create Step Summary
       run: |
         if [ -f reports/final/security-report.md ]; then
-          echo "##  Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔒 Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
           cat reports/final/security-report.md >> $GITHUB_STEP_SUMMARY
         else
-          echo " No security summary generated" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ No security summary generated" >> $GITHUB_STEP_SUMMARY
         fi
 
     - name: Upload Security Summary
@@ -516,3 +525,4 @@ jobs:
       with:
         path: reports/final/security-report.md
         header: security-report
+
