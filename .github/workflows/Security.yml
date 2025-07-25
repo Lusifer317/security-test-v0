@@ -1,4 +1,4 @@
-name: 🔒 Hybrid Security Pipeline
+name: Security Scan
 
 on:
   push:
@@ -35,7 +35,7 @@ env:
 jobs:
 
  Trivy_FS_Scan:
-  name: 🛡️ Trivy Filesystem Vulnerability Scan
+  name: Trivy Filesystem Vulnerability Scan
   runs-on: ubuntu-latest
 
   permissions:
@@ -83,7 +83,7 @@ jobs:
 
 
  semgrep_static_analysis:
-    name: 📝 Semgrep Static Code Analysis
+    name: Semgrep Static Code Analysis
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -105,24 +105,24 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "🔍 Running Semgrep scan..."
-          semgrep --config=auto --sarif --quiet > semgrep.sarif || echo "⚠️ SARIF failed"
-          semgrep --config=auto --json --quiet > semgrep.json || echo "⚠️ JSON failed"
+          echo " Running Semgrep scan..."
+          semgrep --config=auto --sarif --quiet > semgrep.sarif || echo " SARIF failed"
+          semgrep --config=auto --json --quiet > semgrep.json || echo " JSON failed"
 
           if [ -n "$SEMGREP_APP_TOKEN" ]; then
-            echo "📤 Uploading to Semgrep Cloud..."
-            semgrep ci --config=auto || echo "⚠️ Cloud upload failed"
+            echo " Uploading to Semgrep Cloud..."
+            semgrep ci --config=auto || echo " Cloud upload failed"
           fi
 
       - name: Ensure valid outputs
         run: |
          if [ ! -s semgrep.sarif ]; then
-         echo "⚠️ semgrep.sarif not found or empty. Creating fallback SARIF..."
+         echo " semgrep.sarif not found or empty. Creating fallback SARIF..."
          echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"semgrep"}},"results":[]}]}'> semgrep.sarif
           fi
 
          if [ ! -s semgrep.json ]; then
-         echo "⚠️ semgrep.json not found or empty. Creating fallback JSON..."
+         echo " semgrep.json not found or empty. Creating fallback JSON..."
          echo '{"results":[],"errors":[],"paths":{"scanned":[]}}' > semgrep.json
           fi
           
@@ -145,7 +145,7 @@ jobs:
           retention-days: 30
 
  dast_nuclei_scan:
-    name: 🌐 Nuclei DAST Scan
+    name: Nuclei DAST Scan
     runs-on: ubuntu-latest
     needs: semgrep_static_analysis
     steps:
@@ -170,11 +170,11 @@ jobs:
       - name: Download and Update Nuclei Templates
         run: |
           nuclei -update-templates -silent
-          echo "📦 Template update completed"
+          echo " Template update completed"
           
       - name: List Available Template Categories
         run: |
-          echo "🔍 Available template categories:"
+          echo " Available template categories:"
           nuclei -templates-list 2>/dev/null | head -20 || echo "Template listing not available"
 
       - name: Define Target and Validate
@@ -183,11 +183,11 @@ jobs:
           TARGET="${{ env.STAGING_URL }}"
           if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Skipping DAST - invalid or placeholder URL: $TARGET"
+            echo " Skipping DAST - invalid or placeholder URL: $TARGET"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
             echo "target=$TARGET" >> $GITHUB_OUTPUT
-            echo "✅ Valid DAST target: $TARGET"
+            echo " Valid DAST target: $TARGET"
           fi
 
       - name: Run Comprehensive Nuclei Security Scan
@@ -195,7 +195,7 @@ jobs:
         run: |
           mkdir -p reports/nuclei
           
-          echo "🔍 Starting comprehensive security scan with targeted templates..."
+          echo " Starting comprehensive security scan with targeted templates..."
           
           nuclei -target "${{ steps.target.outputs.target }}" \
             -t cves/ \
@@ -258,12 +258,12 @@ jobs:
             -jsonl -output reports/nuclei/nuclei-findings.json \
             -sarif-export reports/nuclei/nuclei-findings.sarif \
             -stats \
-            -silent || echo "⚠️ Nuclei scan finished with warnings"
+            -silent || echo " Nuclei scan finished with warnings"
 
       - name: Run OWASP Top 10 Focused Scan
         if: steps.target.outputs.skip != 'true'
         run: |
-          echo "🔍 Running OWASP Top 10 focused scan..."
+          echo " Running OWASP Top 10 focused scan..."
           
           nuclei -target "${{ steps.target.outputs.target }}" \
             -t http/vulnerabilities/wordpress/ \
@@ -288,12 +288,12 @@ jobs:
             -timeout 45 \
             -retries 3 \
             -jsonl -output reports/nuclei/nuclei-owasp-findings.json \
-            -silent || echo "⚠️ OWASP scan completed with warnings"
+            -silent || echo " OWASP scan completed with warnings"
 
       - name: Run Technology-Specific Detection
         if: steps.target.outputs.skip != 'true'
         run: |
-          echo "🔍 Running technology detection and specific vulnerability checks..."
+          echo " Running technology detection and specific vulnerability checks..."
           
           nuclei -target "${{ steps.target.outputs.target }}" \
             -t technologies/ \
@@ -312,12 +312,12 @@ jobs:
             -rate-limit 20 \
             -timeout 30 \
             -jsonl -output reports/nuclei/nuclei-tech-findings.json \
-            -silent || echo "⚠️ Technology scan completed with warnings"
+            -silent || echo " Technology scan completed with warnings"
 
       - name: Combine and Process Results
         if: steps.target.outputs.skip != 'true'
         run: |
-          echo "📊 Processing and combining scan results..."
+          echo " Processing and combining scan results..."
           
           # Combine all JSONL results
           if [ -f reports/nuclei/nuclei-findings.json ]; then
@@ -343,7 +343,7 @@ jobs:
             critical_findings=$(grep -c '"severity":"critical"' reports/nuclei/nuclei-findings.json || echo 0)
             high_findings=$(grep -c '"severity":"high"' reports/nuclei/nuclei-findings.json || echo 0)
             
-            echo "🎯 Nuclei Scan Summary:"
+            echo "   Nuclei Scan Summary:"
             echo "   Total Findings: $total_findings"
             echo "   Critical: $critical_findings"
             echo "   High: $high_findings"
@@ -353,7 +353,7 @@ jobs:
         if: steps.target.outputs.skip != 'true'
         run: |
           if [ ! -s reports/nuclei/nuclei-findings.sarif ]; then
-            echo "⚠️ Creating fallback SARIF"
+            echo " Creating fallback SARIF"
             mkdir -p reports/nuclei
             echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"nuclei"}},"results":[]}]}'> reports/nuclei/nuclei-findings.sarif
           fi
@@ -374,7 +374,7 @@ jobs:
 
           
  intelligence_reporting:
-  name: 📊 Intelligence & Clean Reporting
+  name:  Intelligence & Clean Reporting
   runs-on: ubuntu-latest
   needs: [semgrep_static_analysis, dast_nuclei_scan, Trivy_FS_Scan]
   if: always()
@@ -387,7 +387,7 @@ jobs:
 
     - name: Summarize Security Results
       run: |
-        echo "📊 Generating summary..."
+        echo " Generating summary..."
 
         total_critical=0; total_high=0; total_medium=0; total_findings=0
 
@@ -441,7 +441,7 @@ jobs:
         mkdir -p reports/final
 
         cat > reports/final/security-report.md << 'REPORT_EOF'
-        # 🔒 Security Pipeline Report
+        #  Security Pipeline Report
 
         ## RISK_SYMBOL Risk Level: RISK_LEVEL
         - **Critical Issues:** TOTAL_CRITICAL
@@ -450,12 +450,12 @@ jobs:
         - **Total Findings:** TOTAL_FINDINGS
         - **Compliance Score:** COMPLIANCE_SCORE%
 
-        ## 📊 Breakdown by Tool
+        ##  Breakdown by Tool
         - **Semgrep (SAST):** SEMGREP_FINDINGS findings (SEMGREP_CRITICAL critical, SEMGREP_HIGH high)
         - **Nuclei (DAST):** NUCLEI_FINDINGS findings (NUCLEI_CRITICAL critical, NUCLEI_HIGH high)
         - **Trivy (FS Scan):** TRIVY_FINDINGS findings (TRIVY_CRITICAL critical, TRIVY_HIGH high)
 
-        ## 🎯 Recommended Actions
+        ##  Recommended Actions
         RECOMMENDED_ACTIONS
 
         **Report generated:** REPORT_DATE
@@ -481,26 +481,26 @@ jobs:
         sed -i "s/REPORT_DATE/$(date -u)/g" reports/final/security-report.md
 
         if [ "$total_critical" -gt 0 ]; then
-          recommendations="- 🚨 Address critical issues immediately and audit SDLC process."
+          recommendations="-  Address critical issues immediately and audit SDLC process."
         elif [ "$total_high" -gt 5 ]; then
-          recommendations="- ⚠️ Review high findings within 7 days and improve testing coverage."
+          recommendations="-  Review high findings within 7 days and improve testing coverage."
         elif [ "$total_high" -gt 0 ]; then
-          recommendations="- 📋 Address high findings in upcoming sprint."
+          recommendations="-  Address high findings in upcoming sprint."
         else
-          recommendations="- ✅ Maintain good security hygiene."
+          recommendations="-  Maintain good security hygiene."
         fi
 
         sed -i "s|RECOMMENDED_ACTIONS|$recommendations|g" reports/final/security-report.md
 
-        echo "✅ Security summary compiled"
+        echo " Security summary compiled"
 
     - name: Create Step Summary
       run: |
         if [ -f reports/final/security-report.md ]; then
-          echo "## 🔒 Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "##  Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
           cat reports/final/security-report.md >> $GITHUB_STEP_SUMMARY
         else
-          echo "⚠️ No security summary generated" >> $GITHUB_STEP_SUMMARY
+          echo " No security summary generated" >> $GITHUB_STEP_SUMMARY
         fi
 
     - name: Upload Security Summary
