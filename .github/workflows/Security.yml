@@ -34,7 +34,55 @@ env:
 
 jobs:
 
-  semgrep_static_analysis:
+ Trivy_FS_Scan:
+  name: 🛡️ Trivy Filesystem Vulnerability Scan
+  runs-on: ubuntu-latest
+
+  permissions:
+    contents: read
+    security-events: write
+    actions: read
+
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Cache Trivy DB
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/trivy
+        key: trivy-db-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/requirements.txt', '**/go.sum') }}
+        restore-keys: trivy-db-${{ runner.os }}-
+
+    - name: Run Trivy Filesystem Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload SARIF to GitHub Security Tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-results.sarif
+        category: trivy-fs
+
+    - name: Archive Trivy results
+      run: |
+        mkdir -p reports/trivy
+        cp trivy-results.sarif reports/trivy/
+
+    - name: Upload Trivy Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-report
+        path: reports/trivy/
+        retention-days: 30
+
+
+ semgrep_static_analysis:
     name: 📝 Semgrep Static Code Analysis
     runs-on: ubuntu-latest
     steps:
@@ -96,7 +144,7 @@ jobs:
           path: reports/semgrep/
           retention-days: 30
 
-  dast_nuclei_scan:
+ dast_nuclei_scan:
     name: 🌐 Nuclei DAST Scan
     runs-on: ubuntu-latest
     needs: semgrep_static_analysis
@@ -171,134 +219,147 @@ jobs:
           name: nuclei-report
           path: reports/nuclei/
           retention-days: 30
-
-  intelligence_reporting:
-    name: 📊 Intelligence & Clean Reporting
-    runs-on: ubuntu-latest
-    needs: [semgrep_static_analysis, dast_nuclei_scan]
-    if: always()
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: reports
-        continue-on-error: true
-
-      - name: Summarize Security Results
-        run: |
-          echo "📊 Generating summary..."
-
-          total_critical=0; total_high=0; total_medium=0; total_findings=0
-
-          if [ -f reports/semgrep-report/semgrep.json ]; then
-            total_critical_semgrep=$(jq '[.results[] | select(.extra.severity=="ERROR" or .extra.severity=="CRITICAL")] | length' reports/semgrep-report/semgrep.json)
-            total_high_semgrep=$(jq '[.results[] | select(.extra.severity=="WARNING" or .extra.severity=="HIGH")] | length' reports/semgrep-report/semgrep.json)
-            total_medium_semgrep=$(jq '[.results[] | select(.extra.severity=="MEDIUM")] | length' reports/semgrep-report/semgrep.json)
-            total_findings_semgrep=$(jq '.results | length' reports/semgrep-report/semgrep.json)
-          else
-            total_critical_semgrep=0; total_high_semgrep=0; total_medium_semgrep=0; total_findings_semgrep=0
-          fi
-
-          if [ -f reports/nuclei-report/nuclei-findings.json ]; then
-            total_critical_nuclei=$(jq '[.[] | select(.info.severity=="critical")] | length' reports/nuclei-report/nuclei-findings.json)
-            total_high_nuclei=$(jq '[.[] | select(.info.severity=="high")] | length' reports/nuclei-report/nuclei-findings.json)
-            total_medium_nuclei=$(jq '[.[] | select(.info.severity=="medium")] | length' reports/nuclei-report/nuclei-findings.json)
-            total_findings_nuclei=$(jq 'length' reports/nuclei-report/nuclei-findings.json)
-          else
-            total_critical_nuclei=0; total_high_nuclei=0; total_medium_nuclei=0; total_findings_nuclei=0
-          fi
-
-          total_critical=$((total_critical_semgrep + total_critical_nuclei))
-          total_high=$((total_high_semgrep + total_high_nuclei))
-          total_medium=$((total_medium_semgrep + total_medium_nuclei))
-          total_findings=$((total_findings_semgrep + total_findings_nuclei))
-
-          if [ "$total_critical" -gt 0 ]; then
-            risk_level="CRITICAL"; risk_symbol="🚨"
-          elif [ "$total_high" -gt 5 ]; then
-            risk_level="HIGH"; risk_symbol="⚠️"
-          elif [ "$total_high" -gt 0 ]; then
-            risk_level="MEDIUM"; risk_symbol="🟡"
-          else
-            risk_level="LOW"; risk_symbol="✅"
-          fi
-
-          compliance_score=$((100 - total_critical * 10 - total_high * 3))
-          [ $compliance_score -lt 0 ] && compliance_score=0
-
-          mkdir -p reports/final
-
-          cat > reports/final/security-report.md << 'REPORT_EOF'
-          # 🔒 Security Pipeline Report
-
-          ## RISK_SYMBOL Risk Level: RISK_LEVEL
-          - **Critical Issues:** TOTAL_CRITICAL
-          - **High Issues:** TOTAL_HIGH
-          - **Medium Issues:** TOTAL_MEDIUM
-          - **Total Findings:** TOTAL_FINDINGS
-          - **Compliance Score:** COMPLIANCE_SCORE%
-
-          ## 📊 Breakdown by Tool
-          - **Semgrep (SAST):** SEMGREP_FINDINGS findings (SEMGREP_CRITICAL critical, SEMGREP_HIGH high)
-          - **Nuclei (DAST):** NUCLEI_FINDINGS findings (NUCLEI_CRITICAL critical, NUCLEI_HIGH high)
-
-          ## 🎯 Recommended Actions
-          RECOMMENDED_ACTIONS
-
-          **Report generated:** REPORT_DATE
-          REPORT_EOF
-
-          # Replace placeholders with actual values
-          sed -i "s/RISK_SYMBOL/$risk_symbol/g" reports/final/security-report.md
-          sed -i "s/RISK_LEVEL/$risk_level/g" reports/final/security-report.md
-          sed -i "s/TOTAL_CRITICAL/$total_critical/g" reports/final/security-report.md
-          sed -i "s/TOTAL_HIGH/$total_high/g" reports/final/security-report.md
-          sed -i "s/TOTAL_MEDIUM/$total_medium/g" reports/final/security-report.md
-          sed -i "s/TOTAL_FINDINGS/$total_findings/g" reports/final/security-report.md
-          sed -i "s/COMPLIANCE_SCORE/$compliance_score/g" reports/final/security-report.md
-          sed -i "s/SEMGREP_FINDINGS/$total_findings_semgrep/g" reports/final/security-report.md
-          sed -i "s/SEMGREP_CRITICAL/$total_critical_semgrep/g" reports/final/security-report.md
-          sed -i "s/SEMGREP_HIGH/$total_high_semgrep/g" reports/final/security-report.md
-          sed -i "s/NUCLEI_FINDINGS/$total_findings_nuclei/g" reports/final/security-report.md
-          sed -i "s/NUCLEI_CRITICAL/$total_critical_nuclei/g" reports/final/security-report.md
-          sed -i "s/NUCLEI_HIGH/$total_high_nuclei/g" reports/final/security-report.md
-          sed -i "s/REPORT_DATE/$(date -u)/g" reports/final/security-report.md
-
-          # Generate recommendations based on findings
-          if [ "$total_critical" -gt 0 ]; then
-            recommendations="- 🚨 Address critical issues immediately and audit SDLC process."
-          elif [ "$total_high" -gt 5 ]; then
-            recommendations="- ⚠️ Review high findings within 7 days and improve testing coverage."
-          elif [ "$total_high" -gt 0 ]; then
-            recommendations="- 📋 Address high findings in upcoming sprint."
-          else
-            recommendations="- ✅ Maintain good security hygiene."
-          fi
-
-          sed -i "s|RECOMMENDED_ACTIONS|$recommendations|g" reports/final/security-report.md
-
-          echo "✅ Security summary compiled"
-
-
-      - name: Create Step Summary
-        run: |
-          if [ -f reports/final/security-report.md ]; then
-            echo "## 🔒 Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
-            cat reports/final/security-report.md >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ No security summary generated" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Upload Security Summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-summary
-          path: reports/final/
-          retention-days: 30
           
-      - name: Post PR Comment with Security Summary
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: reports/final/security-report.md
-          header: security-report
+ intelligence_reporting:
+  name: 📊 Intelligence & Clean Reporting
+  runs-on: ubuntu-latest
+  needs: [semgrep_static_analysis, dast_nuclei_scan, Trivy_FS_Scan]
+  if: always()
+  steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: reports
+      continue-on-error: true
+
+    - name: Summarize Security Results
+      run: |
+        echo "📊 Generating summary..."
+
+        total_critical=0; total_high=0; total_medium=0; total_findings=0
+
+        # SEMGREP
+        if [ -f reports/semgrep-report/semgrep.json ]; then
+          total_critical_semgrep=$(jq '[.results[] | select(.extra.severity=="ERROR" or .extra.severity=="CRITICAL")] | length' reports/semgrep-report/semgrep.json)
+          total_high_semgrep=$(jq '[.results[] | select(.extra.severity=="WARNING" or .extra.severity=="HIGH")] | length' reports/semgrep-report/semgrep.json)
+          total_medium_semgrep=$(jq '[.results[] | select(.extra.severity=="MEDIUM")] | length' reports/semgrep-report/semgrep.json)
+          total_findings_semgrep=$(jq '.results | length' reports/semgrep-report/semgrep.json)
+        else
+          total_critical_semgrep=0; total_high_semgrep=0; total_medium_semgrep=0; total_findings_semgrep=0
+        fi
+
+        # NUCLEI
+        if [ -f reports/nuclei-report/nuclei-findings.json ]; then
+          total_critical_nuclei=$(jq '[.[] | select(.info.severity=="critical")] | length' reports/nuclei-report/nuclei-findings.json)
+          total_high_nuclei=$(jq '[.[] | select(.info.severity=="high")] | length' reports/nuclei-report/nuclei-findings.json)
+          total_medium_nuclei=$(jq '[.[] | select(.info.severity=="medium")] | length' reports/nuclei-report/nuclei-findings.json)
+          total_findings_nuclei=$(jq 'length' reports/nuclei-report/nuclei-findings.json)
+        else
+          total_critical_nuclei=0; total_high_nuclei=0; total_medium_nuclei=0; total_findings_nuclei=0
+        fi
+
+        # TRIVY
+        if [ -f reports/trivy/trivy-results.sarif ]; then
+          total_critical_trivy=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/trivy/trivy-results.sarif)
+          total_high_trivy=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/trivy/trivy-results.sarif)
+          total_findings_trivy=$(jq '.runs[].results | length' reports/trivy/trivy-results.sarif)
+        else
+          total_critical_trivy=0; total_high_trivy=0; total_findings_trivy=0
+        fi
+
+        total_critical=$((total_critical_semgrep + total_critical_nuclei + total_critical_trivy))
+        total_high=$((total_high_semgrep + total_high_nuclei + total_high_trivy))
+        total_medium=$((total_medium_semgrep + total_medium_nuclei))
+        total_findings=$((total_findings_semgrep + total_findings_nuclei + total_findings_trivy))
+
+        if [ "$total_critical" -gt 0 ]; then
+          risk_level="CRITICAL"; risk_symbol="🚨"
+        elif [ "$total_high" -gt 5 ]; then
+          risk_level="HIGH"; risk_symbol="⚠️"
+        elif [ "$total_high" -gt 0 ]; then
+          risk_level="MEDIUM"; risk_symbol="🟡"
+        else
+          risk_level="LOW"; risk_symbol="✅"
+        fi
+
+        compliance_score=$((100 - total_critical * 10 - total_high * 3))
+        [ $compliance_score -lt 0 ] && compliance_score=0
+
+        mkdir -p reports/final
+
+        cat > reports/final/security-report.md << 'REPORT_EOF'
+        # 🔒 Security Pipeline Report
+
+        ## RISK_SYMBOL Risk Level: RISK_LEVEL
+        - **Critical Issues:** TOTAL_CRITICAL
+        - **High Issues:** TOTAL_HIGH
+        - **Medium Issues:** TOTAL_MEDIUM
+        - **Total Findings:** TOTAL_FINDINGS
+        - **Compliance Score:** COMPLIANCE_SCORE%
+
+        ## 📊 Breakdown by Tool
+        - **Semgrep (SAST):** SEMGREP_FINDINGS findings (SEMGREP_CRITICAL critical, SEMGREP_HIGH high)
+        - **Nuclei (DAST):** NUCLEI_FINDINGS findings (NUCLEI_CRITICAL critical, NUCLEI_HIGH high)
+        - **Trivy (FS Scan):** TRIVY_FINDINGS findings (TRIVY_CRITICAL critical, TRIVY_HIGH high)
+
+        ## 🎯 Recommended Actions
+        RECOMMENDED_ACTIONS
+
+        **Report generated:** REPORT_DATE
+        REPORT_EOF
+
+        # Replace placeholders
+        sed -i "s/RISK_SYMBOL/$risk_symbol/g" reports/final/security-report.md
+        sed -i "s/RISK_LEVEL/$risk_level/g" reports/final/security-report.md
+        sed -i "s/TOTAL_CRITICAL/$total_critical/g" reports/final/security-report.md
+        sed -i "s/TOTAL_HIGH/$total_high/g" reports/final/security-report.md
+        sed -i "s/TOTAL_MEDIUM/$total_medium/g" reports/final/security-report.md
+        sed -i "s/TOTAL_FINDINGS/$total_findings/g" reports/final/security-report.md
+        sed -i "s/COMPLIANCE_SCORE/$compliance_score/g" reports/final/security-report.md
+        sed -i "s/SEMGREP_FINDINGS/$total_findings_semgrep/g" reports/final/security-report.md
+        sed -i "s/SEMGREP_CRITICAL/$total_critical_semgrep/g" reports/final/security-report.md
+        sed -i "s/SEMGREP_HIGH/$total_high_semgrep/g" reports/final/security-report.md
+        sed -i "s/NUCLEI_FINDINGS/$total_findings_nuclei/g" reports/final/security-report.md
+        sed -i "s/NUCLEI_CRITICAL/$total_critical_nuclei/g" reports/final/security-report.md
+        sed -i "s/NUCLEI_HIGH/$total_high_nuclei/g" reports/final/security-report.md
+        sed -i "s/TRIVY_FINDINGS/$total_findings_trivy/g" reports/final/security-report.md
+        sed -i "s/TRIVY_CRITICAL/$total_critical_trivy/g" reports/final/security-report.md
+        sed -i "s/TRIVY_HIGH/$total_high_trivy/g" reports/final/security-report.md
+        sed -i "s/REPORT_DATE/$(date -u)/g" reports/final/security-report.md
+
+        if [ "$total_critical" -gt 0 ]; then
+          recommendations="- 🚨 Address critical issues immediately and audit SDLC process."
+        elif [ "$total_high" -gt 5 ]; then
+          recommendations="- ⚠️ Review high findings within 7 days and improve testing coverage."
+        elif [ "$total_high" -gt 0 ]; then
+          recommendations="- 📋 Address high findings in upcoming sprint."
+        else
+          recommendations="- ✅ Maintain good security hygiene."
+        fi
+
+        sed -i "s|RECOMMENDED_ACTIONS|$recommendations|g" reports/final/security-report.md
+
+        echo "✅ Security summary compiled"
+
+    - name: Create Step Summary
+      run: |
+        if [ -f reports/final/security-report.md ]; then
+          echo "## 🔒 Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          cat reports/final/security-report.md >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ No security summary generated" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Upload Security Summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-summary
+        path: reports/final/
+        retention-days: 30
+
+    - name: Post PR Comment with Security Summary
+      if: github.event_name == 'pull_request'
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        path: reports/final/security-report.md
+        header: security-report
