@@ -23,8 +23,8 @@ permissions:
 
 env:
   SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-  STAGING_URL: ${{ vars.STAGING_URL || 'https://testphp.vulnweb.com' }}
-  DEV_URL: ${{ vars.DEV_URL || 'https://juice-shop.herokuapp.com' }}
+  STAGING_URL: ${{ vars.STAGING_URL || 'https://juice-shop.herokuapp.com' }}
+  DEV_URL: ${{ vars.DEV_URL || 'https://webgoat.cloud' }}
   PROD_URL: ${{ vars.PRODUCTION_URL || 'https://demo.testfire.net' }}
   MAX_SCAN_TIME: '1800'
   CRITICAL_THRESHOLD: '0'
