@@ -205,35 +205,58 @@ jobs:
           [ $compliance_score -lt 0 ] && compliance_score=0
 
           mkdir -p reports/final
-          cat > reports/final/security-report.md << REPORT_EOF
-# 🔒 Security Pipeline Report
 
-## $risk_symbol Risk Level: $risk_level
-- **Critical Issues:** $total_critical
-- **High Issues:** $total_high
-- **Medium Issues:** $total_medium
-- **Total Findings:** $total_findings
-- **Compliance Score:** ${compliance_score}%
+          cat > reports/final/security-report.md << 'REPORT_EOF'
+          # 🔒 Security Pipeline Report
 
-## 📊 Breakdown by Tool
-- **Semgrep (SAST):** $total_findings_semgrep findings ($total_critical_semgrep critical, $total_high_semgrep high)
-- **Nuclei (DAST):** $total_findings_nuclei findings ($total_critical_nuclei critical, $total_high_nuclei high)
+          ## RISK_SYMBOL Risk Level: RISK_LEVEL
+          - **Critical Issues:** TOTAL_CRITICAL
+          - **High Issues:** TOTAL_HIGH
+          - **Medium Issues:** TOTAL_MEDIUM
+          - **Total Findings:** TOTAL_FINDINGS
+          - **Compliance Score:** COMPLIANCE_SCORE%
 
-## 🎯 Recommended Actions
-$(if [ "$total_critical" -gt 0 ]; then
-  echo "- 🚨 Address critical issues immediately and audit SDLC process.";
-elif [ "$total_high" -gt 5 ]; then
-  echo "- ⚠️ Review high findings within 7 days and improve testing coverage.";
-elif [ "$total_high" -gt 0 ]; then
-  echo "- 📋 Address high findings in upcoming sprint.";
-else
-  echo "- ✅ Maintain good security hygiene.";
-fi)
+          ## 📊 Breakdown by Tool
+          - **Semgrep (SAST):** SEMGREP_FINDINGS findings (SEMGREP_CRITICAL critical, SEMGREP_HIGH high)
+          - **Nuclei (DAST):** NUCLEI_FINDINGS findings (NUCLEI_CRITICAL critical, NUCLEI_HIGH high)
 
-**Report generated:** $(date -u)
-REPORT_EOF
+          ## 🎯 Recommended Actions
+          RECOMMENDED_ACTIONS
+
+          **Report generated:** REPORT_DATE
+          REPORT_EOF
+
+          # Replace placeholders with actual values
+          sed -i "s/RISK_SYMBOL/$risk_symbol/g" reports/final/security-report.md
+          sed -i "s/RISK_LEVEL/$risk_level/g" reports/final/security-report.md
+          sed -i "s/TOTAL_CRITICAL/$total_critical/g" reports/final/security-report.md
+          sed -i "s/TOTAL_HIGH/$total_high/g" reports/final/security-report.md
+          sed -i "s/TOTAL_MEDIUM/$total_medium/g" reports/final/security-report.md
+          sed -i "s/TOTAL_FINDINGS/$total_findings/g" reports/final/security-report.md
+          sed -i "s/COMPLIANCE_SCORE/$compliance_score/g" reports/final/security-report.md
+          sed -i "s/SEMGREP_FINDINGS/$total_findings_semgrep/g" reports/final/security-report.md
+          sed -i "s/SEMGREP_CRITICAL/$total_critical_semgrep/g" reports/final/security-report.md
+          sed -i "s/SEMGREP_HIGH/$total_high_semgrep/g" reports/final/security-report.md
+          sed -i "s/NUCLEI_FINDINGS/$total_findings_nuclei/g" reports/final/security-report.md
+          sed -i "s/NUCLEI_CRITICAL/$total_critical_nuclei/g" reports/final/security-report.md
+          sed -i "s/NUCLEI_HIGH/$total_high_nuclei/g" reports/final/security-report.md
+          sed -i "s/REPORT_DATE/$(date -u)/g" reports/final/security-report.md
+
+          # Generate recommendations based on findings
+          if [ "$total_critical" -gt 0 ]; then
+            recommendations="- 🚨 Address critical issues immediately and audit SDLC process."
+          elif [ "$total_high" -gt 5 ]; then
+            recommendations="- ⚠️ Review high findings within 7 days and improve testing coverage."
+          elif [ "$total_high" -gt 0 ]; then
+            recommendations="- 📋 Address high findings in upcoming sprint."
+          else
+            recommendations="- ✅ Maintain good security hygiene."
+          fi
+
+          sed -i "s|RECOMMENDED_ACTIONS|$recommendations|g" reports/final/security-report.md
 
           echo "✅ Security summary compiled"
+
 
       - name: Create Step Summary
         run: |
