@@ -124,15 +124,15 @@ jobs:
         run: |
           mkdir -p reports/nuclei
           nuclei -target "${{ steps.target.outputs.target }}" \
-            -templates ~/.config/nuclei/templates \
-            -tags cve,vuln,misconfig,exposure \
-            -severity critical,high,medium,low,info \
-            -rate-limit 10 \
-            -timeout 30 \
-            -retries 2 \
-            -jsonl -output reports/nuclei/nuclei-findings.json \
-            -sarif-export reports/nuclei/nuclei-findings.sarif \
-            -silent || echo "⚠️ Nuclei scan finished with warnings"
+          -tags cve,vuln,misconfig,exposure \
+          -severity critical,high,medium,low,info \
+          -rate-limit 10 \
+          -timeout 30 \
+          -retries 2 \
+          -jsonl -output reports/nuclei/nuclei-findings.json \
+          -sarif-export reports/nuclei/nuclei-findings.sarif \
+          -silent || echo "⚠️ Nuclei scan finished with warnings"
+
 
       - name: Validate and Fix SARIF if Needed
         if: steps.target.outputs.skip != 'true'
