@@ -82,11 +82,11 @@ jobs:
           pip install requests beautifulsoup4 urllib3
           mkdir -p reports/api-discovery
 
-      - name: Advanced API endpoint discovery
-        id: discovery
-        run: |
-          echo "🔍 Starting comprehensive API endpoint discovery..."
-
+            - name: Advanced API endpoint discovery
+          id: discovery
+          run: |
+          echo "Starting comprehensive API endpoint discovery..."
+          
           cat > api_discovery.py << 'EOF'
           import requests
           import json
@@ -94,6 +94,10 @@ jobs:
           from urllib.parse import urljoin, urlparse
           import sys
           import time
+          import urllib3
+
+          # Suppress SSL warnings for security testing
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           def discover_api_endpoints(base_url, intensity='medium'):
               endpoints = []
@@ -130,7 +134,7 @@ jobs:
                   ]
                   max_additional_paths = 10
 
-              print(f"🎯 Running {intensity} intensity scan with {len(api_patterns)} patterns")
+              print(f"Running {intensity} intensity scan with {len(api_patterns)} patterns")
 
               # Try different combinations
               for pattern in api_patterns:
@@ -165,7 +169,7 @@ jobs:
 
                       if is_api_endpoint:
                           endpoints.append(endpoint_info)
-                          print(f"  ✅ Found: {url} [{response.status_code}]")
+                          print(f"  Found: {url} [{response.status_code}]")
 
                           # Look for additional endpoints in response
                           if response.status_code == 200 and len(endpoints) < 50:
@@ -186,7 +190,7 @@ jobs:
                                                   'discovered_from': url,
                                                   'discovery_method': 'content_analysis'
                                               })
-                                              print(f"  🔗 Discovered: {additional_url} [{add_response.status_code}]")
+                                              print(f"  Discovered: {additional_url} [{add_response.status_code}]")
                                   except:
                                       continue
 
@@ -201,7 +205,7 @@ jobs:
               base_url = sys.argv[1] if len(sys.argv) > 1 else "https://petstore.swagger.io/v2"
               intensity = sys.argv[2] if len(sys.argv) > 2 else "medium"
 
-              print(f"🚀 Starting API discovery for: {base_url}")
+              print(f"Starting API discovery for: {base_url}")
               endpoints = discover_api_endpoints(base_url, intensity)
 
               # Categorize endpoints
@@ -226,17 +230,19 @@ jobs:
               with open('reports/api-discovery/discovery-report.json', 'w') as f:
                   json.dump(discovery_report, f, indent=2)
 
-              print(f"\n🎯 Discovery Summary:")
+              print(f"Discovery Summary:")
               print(f"   Total endpoints found: {len(endpoints)}")
               print(f"   Accessible (200): {len(accessible_endpoints)}")
               print(f"   Protected (401/403): {len(protected_endpoints)}")
               print(f"   Security posture: {discovery_report['summary']['security_posture']}")
 
-              print(len(endpoints))  # Use print instead of return to output endpoint count
+              print(len(endpoints))  # Output endpoint count for GitHub Actions
           EOF
 
-          endpoint_count=$(python api_discovery.py "${{ steps.validate.outputs.target }}" "${{ env.SCAN_INTENSITY }}")
+          # Run the discovery script and capture output
+          endpoint_count=$(python api_discovery.py "${{ steps.validate.outputs.target }}" "${{ env.SCAN_INTENSITY }}" 2>/dev/null | tail -1)
           echo "endpoints_count=$endpoint_count" >> $GITHUB_OUTPUT
+
 
       - name: Upload discovery artifacts
         uses: actions/upload-artifact@v4
