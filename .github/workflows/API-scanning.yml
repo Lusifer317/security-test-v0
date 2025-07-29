@@ -36,8 +36,8 @@ permissions:
 
 env:
   # API Security Configuration with repository variables and defaults
-  API_BASE_URL: ${{ vars.API_BASE_URL || 'https://restful-booker.herokuapp.com' }}
-  SCAN_INTENSITY: ${{ vars.SCAN_INTENSITY || 'medium' }}
+  API_BASE_URL: ${{ vars.API_BASE_URL || github.event.inputs.target_url || 'https://restful-booker.herokuapp.com' }}
+  SCAN_INTENSITY: ${{ vars.SCAN_INTENSITY || github.event.inputs.scan_intensity || 'medium' }}
   MAX_SCAN_TIME: '1200'
   REPORT_RETENTION_DAYS: '90'
   
@@ -79,12 +79,15 @@ jobs:
 
       - name: Install discovery tools
         run: |
+          echo "Installing Python packages..."
           pip install requests beautifulsoup4 urllib3
+          echo "Creating directories..."
           mkdir -p reports/api-discovery
+          echo "Installation complete"
 
-            - name: Advanced API endpoint discovery
-          id: discovery
-          run: |
+      - name: Advanced API endpoint discovery
+        id: discovery
+        run: |
           echo "Starting comprehensive API endpoint discovery..."
           
           cat > api_discovery.py << 'EOF'
@@ -241,8 +244,14 @@ jobs:
 
           # Run the discovery script and capture output
           endpoint_count=$(python api_discovery.py "${{ steps.validate.outputs.target }}" "${{ env.SCAN_INTENSITY }}" 2>/dev/null | tail -1)
+          
+          # Ensure we have a valid number
+          if [[ ! "$endpoint_count" =~ ^[0-9]+$ ]]; then
+            endpoint_count=0
+          fi
+          
           echo "endpoints_count=$endpoint_count" >> $GITHUB_OUTPUT
-
+          echo "Found $endpoint_count endpoints"
 
       - name: Upload discovery artifacts
         uses: actions/upload-artifact@v4
@@ -274,13 +283,13 @@ jobs:
 
       - name: Install security testing tools
         run: |
-          pip install requests urllib3 python-nmap
+          pip install requests urllib3
           mkdir -p reports/api-security
 
       - name: OWASP ZAP API security scan
         run: |
           TARGET="${{ needs.api_endpoint_discovery.outputs.scan_target }}"
-          echo "🔍 Running OWASP ZAP scan on: $TARGET"
+          echo "Running OWASP ZAP scan on: $TARGET"
           
           # Run ZAP baseline scan with API focus
           docker run --rm \
@@ -291,19 +300,22 @@ jobs:
             -J /zap/reports/zap-api-report.json \
             -w /zap/reports/zap-api-report.md \
             -r /zap/reports/zap-api-report.html \
-            -d || echo "⚠️ ZAP scan completed with findings"
+            -d || echo "ZAP scan completed with findings"
 
       - name: Comprehensive API security testing
         run: |
-          echo "🔍 Running comprehensive API security tests..."
+          echo "Running comprehensive API security tests..."
           
           cat > api_security_tests.py << 'EOF'
           import requests
           import json
           import time
-          import threading
+          import urllib3
           from urllib.parse import urljoin
           import sys
+
+          # Suppress SSL warnings for security testing
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           def load_discovered_endpoints():
               try:
@@ -550,27 +562,27 @@ jobs:
               endpoints = load_discovered_endpoints()
               
               if not endpoints:
-                  print("❌ No endpoints loaded from discovery phase")
+                  print("No endpoints loaded from discovery phase")
                   return 1
               
-              print(f"🔍 Running security tests on {len(endpoints)} discovered endpoints...")
+              print(f"Running security tests on {len(endpoints)} discovered endpoints...")
               
               all_results = []
               
               # Run all security tests
-              print("  🔐 Testing authentication security...")
+              print("  Testing authentication security...")
               all_results.extend(test_authentication_security(endpoints))
               
-              print("  🌐 Testing HTTP security...")
+              print("  Testing HTTP security...")
               all_results.extend(test_http_security(target_url, endpoints))
               
-              print("  ⏱️ Testing rate limiting...")
+              print("  Testing rate limiting...")
               all_results.extend(test_rate_limiting(target_url))
               
-              print("  🛡️ Testing input validation...")
+              print("  Testing input validation...")
               all_results.extend(test_input_validation(endpoints))
               
-              print("  📄 Testing information disclosure...")
+              print("  Testing information disclosure...")
               all_results.extend(test_information_disclosure(endpoints))
               
               # Generate comprehensive security report
@@ -601,7 +613,7 @@ jobs:
                   json.dump(security_report, f, indent=2)
               
               # Print detailed summary
-              print(f"\n🎯 API Security Testing Summary:")
+              print(f"API Security Testing Summary:")
               print(f"   Target: {target_url}")
               print(f"   Endpoints tested: {len(endpoints)}")
               print(f"   Total findings: {security_report['total_findings']}")
@@ -613,10 +625,10 @@ jobs:
               
               # Return appropriate exit code
               if security_report['summary']['critical'] > 0:
-                  print("🚨 Critical vulnerabilities found!")
+                  print("Critical vulnerabilities found!")
                   return 1
               elif security_report['summary']['high'] > int("${{ env.API_HIGH_THRESHOLD }}"):
-                  print("⚠️ High severity vulnerabilities exceed threshold!")
+                  print("High severity vulnerabilities exceed threshold!")
                   return 1
               
               return 0
@@ -649,7 +661,7 @@ jobs:
 
       - name: Generate comprehensive API security report
         run: |
-          echo "📊 Generating comprehensive API security report..."
+          echo "Generating comprehensive API security report..."
           
           cat > generate_report.py << 'EOF'
           import json
@@ -840,6 +852,4 @@ jobs:
               echo "⚠️ FAILURE: High severity vulnerabilities exceed threshold!"
               exit 1
             else
-              echo "✅ Security thresholds passed"
-            fi
-          fi
+              echo "✅ Security
