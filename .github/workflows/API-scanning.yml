@@ -852,4 +852,9 @@ jobs:
               echo "⚠️ FAILURE: High severity vulnerabilities exceed threshold!"
               exit 1
             else
-              echo "✅ Security
+              echo "✅ Security thresholds passed"
+            fi
+          else
+            echo "⚠️ No security summary file found, skipping threshold check"
+          fi
+
