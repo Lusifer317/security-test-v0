@@ -6,11 +6,11 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
-      - '.github/workflows/security-scan.yml'  # Avoid triggering on main security workflow changes
+      - '.github/workflows/security-scan.yml'
   pull_request:
     branches: [ "main", "master" ]
   schedule:
-    - cron: '0 3 * * 1'  # Weekly on Monday at 3 AM
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       target_url:
@@ -38,8 +38,10 @@ env:
   # API Security Configuration with repository variables and defaults
   API_BASE_URL: ${{ vars.API_BASE_URL || 'https://restful-booker.herokuapp.com' }}
   SCAN_INTENSITY: ${{ vars.SCAN_INTENSITY || 'medium' }}
-
-  # Security thresholds for API scanning - define once
+  MAX_SCAN_TIME: '1200'
+  REPORT_RETENTION_DAYS: '90'
+  
+  # Security thresholds for API scanning
   API_CRITICAL_THRESHOLD: ${{ vars.API_CRITICAL_THRESHOLD || '0' }}
   API_HIGH_THRESHOLD: ${{ vars.API_HIGH_THRESHOLD || '3' }}
   API_MEDIUM_THRESHOLD: ${{ vars.API_MEDIUM_THRESHOLD || '10' }}
@@ -52,7 +54,7 @@ jobs:
     outputs:
       endpoints_found: ${{ steps.discovery.outputs.endpoints_count }}
       scan_target: ${{ steps.validate.outputs.target }}
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,12 +68,12 @@ jobs:
         id: validate
         run: |
           TARGET="${{ env.API_BASE_URL }}"
-          
+
           if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
             echo "⚠️ Using demo API for testing: https://petstore.swagger.io/v2"
             TARGET="https://petstore.swagger.io/v2"
           fi
-          
+
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "🎯 API Security scan target: $TARGET"
 
@@ -84,7 +86,7 @@ jobs:
         id: discovery
         run: |
           echo "🔍 Starting comprehensive API endpoint discovery..."
-          
+
           cat > api_discovery.py << 'EOF'
           import requests
           import json
@@ -95,7 +97,7 @@ jobs:
 
           def discover_api_endpoints(base_url, intensity='medium'):
               endpoints = []
-              
+
               # Intensity-based scanning patterns
               if intensity == 'light':
                   api_patterns = ['/api', '/api/v1', '/health', '/status']
@@ -127,16 +129,16 @@ jobs:
                       '/debug', '/docs', '/swagger', '/openapi'
                   ]
                   max_additional_paths = 10
-              
+
               print(f"🎯 Running {intensity} intensity scan with {len(api_patterns)} patterns")
-              
+
               # Try different combinations
               for pattern in api_patterns:
                   try:
                       url = urljoin(base_url, pattern)
                       response = requests.get(url, timeout=10, verify=False, 
                                             headers={'User-Agent': 'API-Security-Scanner/1.0'})
-                      
+
                       endpoint_info = {
                           'url': url,
                           'status_code': response.status_code,
@@ -151,7 +153,7 @@ jobs:
                               'x_frame_options': response.headers.get('x-frame-options', '')
                           }
                       }
-                      
+
                       # Check if this looks like an API endpoint
                       is_api_endpoint = (
                           response.status_code in [200, 401, 403, 405, 422, 429] or 
@@ -160,11 +162,11 @@ jobs:
                           pattern in ['/api', '/graphql'] or
                           any(keyword in response.text.lower()[:1000] for keyword in ['json', 'api', 'endpoint'])
                       )
-                      
+
                       if is_api_endpoint:
                           endpoints.append(endpoint_info)
                           print(f"  ✅ Found: {url} [{response.status_code}]")
-                          
+
                           # Look for additional endpoints in response
                           if response.status_code == 200 and len(endpoints) < 50:
                               content = response.text[:5000]  # First 5KB
@@ -187,25 +189,25 @@ jobs:
                                               print(f"  🔗 Discovered: {additional_url} [{add_response.status_code}]")
                                   except:
                                       continue
-                      
+
                   except Exception as e:
                       continue
-                      
+
                   time.sleep(0.1)  # Rate limiting
-              
+
               return endpoints
 
           if __name__ == "__main__":
               base_url = sys.argv[1] if len(sys.argv) > 1 else "https://petstore.swagger.io/v2"
               intensity = sys.argv[2] if len(sys.argv) > 2 else "medium"
-              
+
               print(f"🚀 Starting API discovery for: {base_url}")
               endpoints = discover_api_endpoints(base_url, intensity)
-              
+
               # Categorize endpoints
               accessible_endpoints = [ep for ep in endpoints if ep['status_code'] == 200]
               protected_endpoints = [ep for ep in endpoints if ep['status_code'] in [401, 403]]
-              
+
               # Save results
               discovery_report = {
                   'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -220,19 +222,19 @@ jobs:
                       'security_posture': 'good' if len(protected_endpoints) > len(accessible_endpoints) else 'needs_review'
                   }
               }
-              
+
               with open('reports/api-discovery/discovery-report.json', 'w') as f:
                   json.dump(discovery_report, f, indent=2)
-              
+
               print(f"\n🎯 Discovery Summary:")
               print(f"   Total endpoints found: {len(endpoints)}")
               print(f"   Accessible (200): {len(accessible_endpoints)}")
               print(f"   Protected (401/403): {len(protected_endpoints)}")
               print(f"   Security posture: {discovery_report['summary']['security_posture']}")
-              
-              return len(endpoints)
+
+              print(len(endpoints))  # Use print instead of return to output endpoint count
           EOF
-          
+
           endpoint_count=$(python api_discovery.py "${{ steps.validate.outputs.target }}" "${{ env.SCAN_INTENSITY }}")
           echo "endpoints_count=$endpoint_count" >> $GITHUB_OUTPUT
 
