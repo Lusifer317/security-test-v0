@@ -35,16 +35,14 @@ permissions:
   issues: write
 
 env:
-  # API Security Configuration
-  API_BASE_URL: ${{ vars.API_BASE_URL || github.event.inputs.target_url || 'https://petstore.swagger.io/v2' }}
-  SCAN_INTENSITY: ${{ github.event.inputs.scan_intensity || 'medium' }}
-  MAX_SCAN_TIME: '1200'  # 20 minutes max
-  REPORT_RETENTION_DAYS: '90'
-  
-  # Security thresholds for API scanning
-  API_CRITICAL_THRESHOLD: '0'
-  API_HIGH_THRESHOLD: '3'
-  API_MEDIUM_THRESHOLD: '10'
+  # API Security Configuration with repository variables and defaults
+  API_BASE_URL: ${{ vars.API_BASE_URL || 'https://restful-booker.herokuapp.com' }}
+  SCAN_INTENSITY: ${{ vars.SCAN_INTENSITY || 'medium' }}
+
+  # Security thresholds for API scanning - define once
+  API_CRITICAL_THRESHOLD: ${{ vars.API_CRITICAL_THRESHOLD || '0' }}
+  API_HIGH_THRESHOLD: ${{ vars.API_HIGH_THRESHOLD || '3' }}
+  API_MEDIUM_THRESHOLD: ${{ vars.API_MEDIUM_THRESHOLD || '10' }}
 
 jobs:
 
