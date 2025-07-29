@@ -49,7 +49,7 @@ env:
 jobs:
 
   api_endpoint_discovery:
-    name: 🔍 API Endpoint Discovery
+    name: API Endpoint Discovery
     runs-on: ubuntu-latest
     outputs:
       endpoints_found: ${{ steps.discovery.outputs.endpoints_count }}
@@ -70,12 +70,12 @@ jobs:
           TARGET="${{ env.API_BASE_URL }}"
 
           if [[ "$TARGET" == *"example.com"* ]] || [[ -z "$TARGET" ]]; then
-            echo "⚠️ Using demo API for testing: https://petstore.swagger.io/v2"
+            echo "WARNING: Using demo API for testing: https://petstore.swagger.io/v2"
             TARGET="https://petstore.swagger.io/v2"
           fi
 
           echo "target=$TARGET" >> $GITHUB_OUTPUT
-          echo "🎯 API Security scan target: $TARGET"
+          echo "API Security scan target: $TARGET"
 
       - name: Install discovery tools
         run: |
@@ -261,7 +261,7 @@ jobs:
           retention-days: ${{ env.REPORT_RETENTION_DAYS }}
 
   api_security_testing:
-    name: 🛡️ API Security Testing
+    name: API Security Testing
     runs-on: ubuntu-latest
     needs: api_endpoint_discovery
     if: needs.api_endpoint_discovery.outputs.endpoints_found > 0
@@ -647,7 +647,7 @@ jobs:
           retention-days: ${{ env.REPORT_RETENTION_DAYS }}
 
   api_security_reporting:
-    name: 📊 API Security Report
+    name: API Security Report
     runs-on: ubuntu-latest
     needs: [api_endpoint_discovery, api_security_testing]
     if: always()
@@ -699,78 +699,78 @@ jobs:
 
           # Determine risk level
           if findings_summary.get('critical', 0) > 0:
-              risk_level, risk_emoji = "CRITICAL", "🚨"
+              risk_level, risk_indicator = "CRITICAL", "[CRITICAL]"
           elif findings_summary.get('high', 0) > 3:
-              risk_level, risk_emoji = "HIGH", "⚠️"
+              risk_level, risk_indicator = "HIGH", "[HIGH]"
           elif findings_summary.get('high', 0) > 0 or findings_summary.get('medium', 0) > 5:
-              risk_level, risk_emoji = "MEDIUM", "🟡"
+              risk_level, risk_indicator = "MEDIUM", "[MEDIUM]"
           else:
-              risk_level, risk_emoji = "LOW", "✅"
+              risk_level, risk_indicator = "LOW", "[LOW]"
 
           # Create markdown report
-          report_content = f"""# 🔒 API Security Scan Report
+          report_content = f"""# API Security Scan Report
 
-          ## {risk_emoji} Overall Risk Level: {risk_level}
+          ## {risk_indicator} Overall Risk Level: {risk_level}
 
           **Security Score: {security_score}/100**
 
-          ## 📊 Scan Summary
+          ## Scan Summary
           - **Target:** {security_results.get('target', 'N/A')}
           - **Scan Date:** {security_results.get('timestamp', 'N/A')}
           - **Endpoints Discovered:** {total_endpoints}
           - **Endpoints Tested:** {security_results.get('endpoints_tested', 0)}
 
-          ## 🎯 Endpoint Discovery Results
+          ## Endpoint Discovery Results
           - **Total API Endpoints:** {total_endpoints}
           - **Accessible (200):** {accessible_endpoints}
           - **Protected (401/403):** {protected_endpoints}
           - **Security Posture:** {discovery_report.get('summary', {}).get('security_posture', 'Unknown')}
 
-          ## 🛡️ Security Findings
+          ## Security Findings
           - **Critical:** {findings_summary.get('critical', 0)}
           - **High:** {findings_summary.get('high', 0)}
           - **Medium:** {findings_summary.get('medium', 0)}
           - **Low:** {findings_summary.get('low', 0)}
           - **Info:** {findings_summary.get('info', 0)}
 
-          ## 🧪 Test Coverage
+          ## Test Coverage
           - **Authentication Tests:** {test_coverage.get('authentication_tests', 0)}
           - **HTTP Security Tests:** {test_coverage.get('http_security_tests', 0)}
           - **Input Validation Tests:** {test_coverage.get('input_validation_tests', 0)}
           - **Information Disclosure Tests:** {test_coverage.get('information_disclosure_tests', 0)}
           - **Rate Limiting Tests:** {test_coverage.get('rate_limiting_tests', 0)}
 
-          ## 🎯 Recommendations
+          ## Recommendations
 
           """
 
           # Add specific recommendations based on findings
           if findings_summary.get('critical', 0) > 0:
-              report_content += "### 🚨 IMMEDIATE ACTION REQUIRED\n"
+              report_content += "### IMMEDIATE ACTION REQUIRED\n"
               report_content += "- **Critical vulnerabilities detected** - Address immediately\n"
               report_content += "- Implement emergency security patches\n"
               report_content += "- Consider taking vulnerable endpoints offline until fixed\n\n"
           
           if findings_summary.get('high', 0) > 0:
-              report_content += "### ⚠️ HIGH PRIORITY\n"
+              report_content += "### HIGH PRIORITY\n"
               report_content += "- Review and fix high-severity vulnerabilities within 48-72 hours\n"
               report_content += "- Implement additional authentication and authorization controls\n"
               report_content += "- Enhance input validation and sanitization\n\n"
 
           if accessible_endpoints > protected_endpoints:
-              report_content += "### 🔐 AUTHENTICATION IMPROVEMENT\n"
+              report_content += "### AUTHENTICATION IMPROVEMENT\n"
               report_content += "- Too many endpoints are accessible without authentication\n"
               report_content += "- Implement proper authentication mechanisms\n"
               report_content += "- Review and restrict endpoint access based on user roles\n\n"
 
           if test_coverage.get('rate_limiting_tests', 0) > 0 and 'Rate' in str(security_results.get('findings', [])):
-              report_content += "### ⏱️ RATE LIMITING\n"
+              report_content += "### RATE LIMITING\n"
               report_content += "- Implement rate limiting to prevent abuse\n"
               report_content += "- Configure appropriate request thresholds\n"
               report_content += "- Add monitoring for unusual traffic patterns\n\n"
 
           report_content += f"""
-          ## 📈 Next Steps
+          ## Next Steps
           1. **Prioritize Critical/High findings** - Address these vulnerabilities first
           2. **Implement security headers** - Add missing security headers to all endpoints
           3. **Enhance authentication** - Strengthen authentication and authorization mechanisms
@@ -804,7 +804,7 @@ jobs:
           with open('reports/final/api-security-summary.json', 'w') as f:
               json.dump(summary, f, indent=2)
 
-          print("✅ API Security Report generated successfully")
+          print("API Security Report generated successfully")
           print(f"Risk Level: {risk_level}")
           print(f"Security Score: {security_score}/100")
           print(f"Total Findings: {total_findings}")
@@ -815,10 +815,10 @@ jobs:
       - name: Create workflow summary
         run: |
           if [ -f reports/final/api-security-report.md ]; then
-            echo "## 🔒 API Security Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "## API Security Scan Results" >> $GITHUB_STEP_SUMMARY
             cat reports/final/api-security-report.md >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ API Security report could not be generated" >> $GITHUB_STEP_SUMMARY
+            echo "WARNING: API Security report could not be generated" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Post PR comment with security report
@@ -846,15 +846,14 @@ jobs:
             echo "  High findings: $high (threshold: ${{ env.API_HIGH_THRESHOLD }})"
             
             if [ "$critical" -gt "${{ env.API_CRITICAL_THRESHOLD }}" ]; then
-              echo "🚨 FAILURE: Critical vulnerabilities exceed threshold!"
+              echo "FAILURE: Critical vulnerabilities exceed threshold!"
               exit 1
             elif [ "$high" -gt "${{ env.API_HIGH_THRESHOLD }}" ]; then
-              echo "⚠️ FAILURE: High severity vulnerabilities exceed threshold!"
+              echo "FAILURE: High severity vulnerabilities exceed threshold!"
               exit 1
             else
-              echo "✅ Security thresholds passed"
+              echo "Security thresholds passed"
             fi
           else
-            echo "⚠️ No security summary file found, skipping threshold check"
+            echo "WARNING: No security summary file found, skipping threshold check"
           fi
-
