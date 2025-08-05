@@ -1,0 +1,26 @@
+# ── dependencies ──────────────────
+node_modules/
+vendor/
+packages/
+.venv/
+venv/
+
+# ── build / generated ─────────────
+build/
+dist/
+target/
+*.min.js
+*.bundle.js
+coverage/
+.coverage/
+*.class
+*.jar
+*.dll
+*.so
+
+# ── project meta ──────────────────
+docs/
+.git/
+.github/
+.vscode/
+.idea/
