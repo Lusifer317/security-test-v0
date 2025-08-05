@@ -103,7 +103,7 @@ jobs:
           ${{ runner.os }}-semgrep-
 
     - name: Install Semgrep CLI
-      run: pip install semgrep==${{ env.SEMGREP_VERSION }}
+      run: pip install semgrep
 
     
     - name: Run Semgrep CI
