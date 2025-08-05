@@ -26,7 +26,7 @@ env:
   STAGING_URL: ${{ vars.STAGING_URL || 'https://juice-shop.herokuapp.com' }}
   DEV_URL: ${{ vars.DEV_URL || 'https://webgoat.cloud' }}
   PROD_URL: ${{ vars.PRODUCTION_URL || 'https://demo.testfire.net' }}
-  SEMGREP_VERSION: 1.131.0
+  SEMGREP_VERSION: 1.133.0
   MAX_SCAN_TIME: '1800'
   CRITICAL_THRESHOLD: '0'
   HIGH_THRESHOLD: '5'
